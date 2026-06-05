@@ -1,0 +1,19 @@
+{
+  "page": {
+    "wrapper": "min-h-screen bg-slate-100 p-8",
+    "container": "max-w-5xl mx-auto"
+  },
+  "hero": {
+    "title": "text-5xl font-bold text-slate-900",
+    "subtitle": "text-lg text-slate-600 mt-3"
+  },
+  "card": {
+    "className": "bg-white rounded-2xl shadow-sm border border-slate-200 p-6"
+  },
+  "input": {
+    "className": "w-full rounded-xl border border-slate-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-900"
+  },
+  "button": {
+    "className": "px-6 py-3 rounded-xl bg-slate-900 text-white font-medium hover:bg-slate-800 transition"
+  }
+}
