@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ArrowLeft, ArrowRight, CheckCircle2 } from "lucide-react";
 import { createBusinessContext } from "../services/businessContextService";
 
 const CONTEXTS_KEY = "businessContexts";
@@ -18,26 +19,32 @@ const saveContext = (id, url) => {
     localStorage.setItem(CONTEXTS_KEY, JSON.stringify(contexts.slice(0, 10)));
 };
 
+const NEXT_STEPS = [
+    "We learn about your business",
+    "We create a demo experience",
+    "You can test chat and voice conversations",
+    "You can see how customer leads are captured",
+];
+
 export default function SetupPage() {
     const [websiteUrl, setWebsiteUrl] = useState("");
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
-    const [contexts] = useState(loadContexts);
-    const navigate = useNavigate();
+    const [loading, setLoading]       = useState(false);
+    const [error, setError]           = useState(null);
+    const [contexts]                  = useState(loadContexts);
+    const navigate                    = useNavigate();
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
-
         try {
             const response = await createBusinessContext(websiteUrl);
             const id = response.data.id;
             saveContext(id, websiteUrl);
             localStorage.setItem("businessContextId", id);
-            window.location.href = "/chat";
+            window.location.href = "/experience";
         } catch (err) {
-            setError(err.message || "Something went wrong.");
+            setError(err.message || "Something went wrong. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -45,39 +52,48 @@ export default function SetupPage() {
 
     const handleSwitch = (ctx) => {
         localStorage.setItem("businessContextId", ctx.id);
-        window.location.href = "/chat";
+        window.location.href = "/experience";
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-900 flex items-center justify-center px-4 py-16">
-            <div className="w-full max-w-md">
+        <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-900 px-4 py-8 flex flex-col">
 
-                {/* Logo + Headline */}
-                <div className="text-center mb-10">
-                    <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-600 shadow-lg shadow-blue-200 dark:shadow-blue-900/50 mb-5">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7 text-white">
-                            <path d="M4.913 2.658c2.075-.27 4.19-.408 6.337-.408 2.147 0 4.262.139 6.337.408 1.922.25 3.291 1.861 3.405 3.727a4.403 4.403 0 00-1.032-.211 50.89 50.89 0 00-8.42 0c-2.358.196-4.04 2.19-4.04 4.434v4.286a4.47 4.47 0 002.433 3.984L7.28 21.53A.75.75 0 016 21v-4.03a48.527 48.527 0 01-1.087-.128C2.905 16.58 1.5 14.833 1.5 12.862V6.638c0-1.97 1.405-3.718 3.413-3.979z" />
-                            <path d="M15.75 7.5c-1.376 0-2.739.057-4.086.169C10.124 7.797 9 9.103 9 10.609v4.285c0 1.507 1.128 2.81 2.67 2.94 1.243.102 2.5.157 3.768.165l2.782 2.781a.75.75 0 001.28-.53v-2.39l.33-.026c1.542-.13 2.67-1.433 2.67-2.94v-4.286c0-1.505-1.124-2.81-2.664-2.94A49.392 49.392 0 0015.75 7.5z" />
-                        </svg>
-                    </div>
-                    <h1 className="text-4xl font-bold text-gray-900 dark:text-white tracking-tight">AI Website Assistant</h1>
+            <div className="w-full max-w-md mx-auto flex-1">
+
+                {/* ── Back button ────────────────────────────────────────── */}
+                <div className="mb-8">
+                    <button
+                        onClick={() => navigate("/")}
+                        className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 transition-colors"
+                    >
+                        <ArrowLeft size={15} />
+                        Back
+                    </button>
                 </div>
 
-                {/* Feature pills */}
-                <div className="flex flex-wrap justify-center gap-2 mb-8">
-                    {["Instant setup", "Auto lead capture"].map((f) => (
-                        <span key={f} className="text-xs font-medium text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 border border-blue-100 dark:border-blue-800 rounded-full px-3 py-1">
-                            {f}
-                        </span>
-                    ))}
+                {/* ── Hero ───────────────────────────────────────────────── */}
+                <div className="text-center mb-8">
+                    <span className="inline-block text-[10px] font-bold tracking-widest uppercase text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 border border-blue-100 dark:border-blue-800/60 rounded-full px-3 py-1 mb-4">
+                        Free Demo
+                    </span>
+
+                    <h1 className="text-4xl font-bold text-gray-900 dark:text-white tracking-tight mb-3">
+                        Try Blueslate Free
+                    </h1>
+                    <p className="text-base text-gray-500 dark:text-gray-400 leading-relaxed max-w-sm mx-auto">
+                        See how Blueslate answers customer questions and captures leads for your business in minutes.
+                    </p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-3 tracking-wide">
+                        No credit card required &nbsp;·&nbsp; Free demo &nbsp;·&nbsp; Takes less than a minute
+                    </p>
                 </div>
 
-                {/* New context card */}
-                <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-xl shadow-gray-200/60 dark:shadow-gray-950/60 border border-gray-100 dark:border-gray-700 p-8">
+                {/* ── Input card ─────────────────────────────────────────── */}
+                <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-xl shadow-gray-200/60 dark:shadow-gray-950/60 border border-gray-100 dark:border-gray-700 p-8 mb-4">
                     <form onSubmit={handleSubmit} className="space-y-5">
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                                Website URL
+                                Your Business Website
                             </label>
                             <div className="relative">
                                 <div className="absolute inset-y-0 left-3.5 flex items-center pointer-events-none">
@@ -89,14 +105,14 @@ export default function SetupPage() {
                                     type="text"
                                     value={websiteUrl}
                                     onChange={(e) => setWebsiteUrl(e.target.value)}
-                                    placeholder="https://yourwebsite.com"
+                                    placeholder="https://yourbusiness.com"
                                     required
                                     disabled={loading}
                                     className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-gray-600 focus:border-transparent transition disabled:opacity-50"
                                 />
                             </div>
                             <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                                We'll scan the page and build a searchable knowledge base.
+                                Enter your website and we'll create a demo experience based on your business.
                             </p>
                         </div>
 
@@ -112,7 +128,7 @@ export default function SetupPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold shadow-md shadow-blue-200 dark:shadow-blue-900/50 transition-all flex items-center justify-center gap-2"
+                            className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold shadow-md shadow-blue-200 dark:shadow-blue-900/50 transition-all flex items-center justify-center gap-2"
                         >
                             {loading ? (
                                 <>
@@ -120,25 +136,38 @@ export default function SetupPage() {
                                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
                                     </svg>
-                                    Building Knowledge Base...
+                                    Setting up your demo...
                                 </>
                             ) : (
                                 <>
-                                    Build Knowledge
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                                        <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
-                                    </svg>
+                                    Create My Demo
+                                    <ArrowRight size={16} />
                                 </>
                             )}
                         </button>
                     </form>
                 </div>
 
-                {/* Recent contexts */}
+                {/* ── What happens next ──────────────────────────────────── */}
+                <div className="bg-white/70 dark:bg-gray-800/50 rounded-2xl border border-gray-200 dark:border-gray-700/60 px-5 py-4 mb-6">
+                    <p className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3">
+                        What happens next?
+                    </p>
+                    <ul className="space-y-2.5">
+                        {NEXT_STEPS.map((step) => (
+                            <li key={step} className="flex items-center gap-2.5 text-sm text-gray-600 dark:text-gray-300">
+                                <CheckCircle2 size={14} className="text-green-500 dark:text-green-400 shrink-0" />
+                                {step}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+
+                {/* ── Previous demos ─────────────────────────────────────── */}
                 {contexts.length > 0 && (
-                    <div className="mt-6">
+                    <div>
                         <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-3 text-center">
-                            Recent websites
+                            Previous demos
                         </p>
                         <div className="space-y-2">
                             {contexts.map((ctx) => (
@@ -156,7 +185,7 @@ export default function SetupPage() {
                                         <p className="text-sm font-medium text-gray-700 dark:text-gray-200 truncate group-hover:text-blue-700 dark:group-hover:text-blue-400 transition-colors">
                                             {ctx.url}
                                         </p>
-                                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">ID #{ctx.id}</p>
+                                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Previous demo</p>
                                     </div>
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover:text-blue-400 dark:group-hover:text-blue-500 shrink-0 transition-colors">
                                         <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
@@ -167,7 +196,6 @@ export default function SetupPage() {
                     </div>
                 )}
 
-                
             </div>
         </div>
     );

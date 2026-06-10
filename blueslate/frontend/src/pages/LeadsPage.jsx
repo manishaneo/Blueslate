@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { Mail, Copy, Check } from "lucide-react";
 import { getLeads, getDashboardStats, updateLeadStatus } from "../services/leadService";
 
@@ -229,6 +230,7 @@ function LeadModal({ lead, onClose }) {
 // ── page ──────────────────────────────────────────────────────────────────────
 
 export default function LeadsPage() {
+    const navigate = useNavigate();
     const [leads, setLeads]       = useState([]);
     const [stats, setStats]       = useState(null);
     const [loading, setLoading]   = useState(true);
@@ -407,7 +409,7 @@ export default function LeadsPage() {
                                         {filtered.map((lead) => (
                                             <tr
                                                 key={lead.id}
-                                                onClick={() => setSelectedLead(lead)}
+                                                onClick={() => navigate(`/leads/${lead.id}`, { state: { lead } })}
                                                 className="hover:bg-blue-50/40 dark:hover:bg-blue-900/10 transition-colors cursor-pointer"
                                             >
                                                 <td className="px-5 py-3.5">

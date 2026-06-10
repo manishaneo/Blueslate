@@ -1,12 +1,17 @@
-import axios from "axios";
+import api from "../utils/api";
 
-const API_URL = "http://localhost:5000/api";
+export const sendMessage = async (question, conversationId = null, source = "business_chat") => {
+    const response = await api.post("/chat", { question, conversationId, source });
+    return response.data;
+};
 
-export const sendMessage = async (businessContextId, question) => {
-    const response = await axios.post(`${API_URL}/chat`, {
-        businessContextId,
-        question,
-    });
+// Calls /api/chat/test — no persistence, no lead creation, no analytics impact.
+export const sendTestMessage = async (question) => {
+    const response = await api.post("/chat/test", { question });
+    return response.data;
+};
 
+export const finalizeConversation = async (conversationId, metadata) => {
+    const response = await api.patch(`/conversations/${conversationId}`, { metadata });
     return response.data;
 };

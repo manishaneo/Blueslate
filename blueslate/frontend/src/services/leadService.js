@@ -1,18 +1,16 @@
-import axios from "axios";
-
-const API_URL = "http://localhost:5000/api";
+import api from "../utils/api";
 
 export const getLeads = async () => {
-    const response = await axios.get(`${API_URL}/leads`);
+    const response = await api.get("/leads");
     return response.data;
 };
 
 export const getDashboardStats = async () => {
-    const response = await axios.get(`${API_URL}/dashboard/stats`);
+    const response = await api.get("/dashboard/stats");
     return response.data;
 };
 
 export const updateLeadStatus = async (id, status) => {
-    const response = await axios.patch(`${API_URL}/leads/${id}/status`, { status });
+    const response = await api.patch(`/leads/${id}/status`, { status });
     return response.data;
 };

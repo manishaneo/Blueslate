@@ -1,0 +1,248 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// PHASE 1 — Legacy models (integer PKs, no timezone). Keep until fully migrated.
+// All existing service code (chat.service, lead.service, etc.) references these.
+// =============================================================================
+
+model BusinessContext {
+  id            Int       @id @default(autoincrement())
+  businessId    String?   @db.Uuid
+  websiteUrl    String
+  title         String?
+  description   String?
+  content       String?
+  faqs          Json?
+  lastScrapedAt DateTime?
+  createdAt     DateTime  @default(now())
+  leads         Lead[]
+  conversations Conversation[]
+
+  business    Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+}
+
+model Lead {
+  id                Int      @id @default(autoincrement())
+  businessContextId Int
+  name              String?
+  email             String?
+  phone             String?
+  interest          String?
+  notes             String?
+  source            String?  @db.VarChar(100)
+  status            String   @default("NEW")
+  createdAt         DateTime @default(now())
+
+  businessContext BusinessContext @relation(fields: [businessContextId], references: [id])
+  conversations   Conversation[]
+}
+
+// =============================================================================
+// PHASE 2 — Multi-tenant auth & business management
+// UUID primary keys · TIMESTAMPTZ everywhere · Proper FKs & constraints
+// =============================================================================
+
+// ── Enums ─────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  APP_ADMIN
+  BUSINESS_ADMIN
+
+  @@map("user_role")
+}
+
+enum BusinessStatus {
+  pending_setup
+  active
+  disabled
+
+  @@map("business_status")
+}
+
+enum MemberRole {
+  admin
+  viewer
+
+  @@map("member_role")
+}
+
+enum InvitationStatus {
+  pending
+  accepted
+  expired
+
+  @@map("invitation_status")
+}
+
+// ── users ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  name          String    @db.VarChar(255)
+  email         String    @unique @db.VarChar(255)
+  passwordHash  String    @db.VarChar(255)
+  role          UserRole
+  emailVerified Boolean   @default(false)
+  createdAt     DateTime  @default(now()) @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @db.Timestamptz
+  deletedAt     DateTime? @db.Timestamptz
+
+  // Relations
+  memberships     BusinessMember[]
+  invitationsSent Invitation[]     @relation("InvitedByUser")
+
+  @@index([role])
+  @@map("users")
+}
+
+// ── businesses ────────────────────────────────────────────────────────────────
+
+model Business {
+  id        String         @id @default(uuid()) @db.Uuid
+  name      String         @db.VarChar(255)
+  website   String         @db.VarChar(2048)
+  status    BusinessStatus @default(pending_setup)
+  createdAt DateTime       @default(now()) @db.Timestamptz
+  updatedAt DateTime       @updatedAt @db.Timestamptz
+  deletedAt DateTime?      @db.Timestamptz
+
+  // Relations
+  members        BusinessMember[]
+  contexts       BusinessContextRecord[]
+  legacyContexts BusinessContext[]
+  invitations    Invitation[]
+  settings       BusinessSettings?
+  conversations  Conversation[]
+
+  @@index([status])
+  @@index([website])
+  @@map("businesses")
+}
+
+// ── business_members ──────────────────────────────────────────────────────────
+// Junction table — maps users to businesses with a per-business role.
+
+model BusinessMember {
+  id         String     @id @default(uuid()) @db.Uuid
+  businessId String     @db.Uuid
+  userId     String     @db.Uuid
+  role       MemberRole @default(admin)
+  createdAt  DateTime   @default(now()) @db.Timestamptz
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, userId])
+  @@index([businessId])
+  @@index([userId])
+  @@map("business_members")
+}
+
+// ── invitations ───────────────────────────────────────────────────────────────
+// App Admin invites a Business Admin. On acceptance: create user + member row.
+// businessId is nullable — NULL means the business doesn't exist yet.
+
+model Invitation {
+  id           String           @id @default(uuid()) @db.Uuid
+  email        String           @db.VarChar(255)
+  businessName String           @db.VarChar(255)
+  businessId   String?          @db.Uuid
+  token        String           @unique @db.VarChar(255)
+  status       InvitationStatus @default(pending)
+  invitedBy    String?          @db.Uuid
+  expiresAt    DateTime         @db.Timestamptz
+  acceptedAt   DateTime?        @db.Timestamptz
+  createdAt    DateTime         @default(now()) @db.Timestamptz
+
+  invitedByUser User?     @relation("InvitedByUser", fields: [invitedBy], references: [id], onDelete: SetNull)
+  business      Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("invitations")
+}
+
+// ── business_contexts ─────────────────────────────────────────────────────────
+// Versioned scraped knowledge for a business. isCurrent = true is the active one.
+// NOTE: distinct from the legacy BusinessContext model above.
+
+model BusinessContextRecord {
+  id          String    @id @default(uuid()) @db.Uuid
+  businessId  String    @db.Uuid
+  title       String    @db.VarChar(512)
+  description String?
+  websiteUrl  String    @db.VarChar(2048)
+  content     String
+  isCurrent   Boolean   @default(false)
+  scrapedAt   DateTime  @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  // Composite: fast lookup of the active context per business
+  @@index([businessId, isCurrent])
+  @@index([scrapedAt])
+  @@map("business_contexts")
+}
+
+// ── business_settings ─────────────────────────────────────────────────────────
+// One row per business. Controls the AI persona, tone, and operational config.
+
+model BusinessSettings {
+  id              String   @id @default(uuid()) @db.Uuid
+  businessId      String   @unique @db.Uuid
+  aiPersonaName   String   @default("Auri") @db.VarChar(100)
+  greeting        String?
+  tone            String   @default("professional") @db.VarChar(50)
+  language        String   @default("en") @db.VarChar(10)
+  businessHours   Json?    @db.JsonB
+  escalationPhone String?  @db.VarChar(50)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+  updatedAt       DateTime @updatedAt @db.Timestamptz
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@map("business_settings")
+}
+
+// ── conversations ─────────────────────────────────────────────────────────────
+// Stores customer portal chat sessions. One row per conversation.
+// transcript is a JSON array of { role, content, ts } message turns.
+
+model Conversation {
+  id                String   @id @default(uuid()) @db.Uuid
+  businessId        String   @db.Uuid
+  businessContextId Int
+
+  source     String?
+  transcript Json
+  summary    String?
+  leadId     Int?    @map("lead_id")
+  metadata   Json?
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt      @db.Timestamptz
+
+  business        Business        @relation(fields: [businessId],        references: [id], onDelete: Cascade)
+  businessContext BusinessContext @relation(fields: [businessContextId], references: [id], onDelete: Cascade)
+  lead            Lead?           @relation(fields: [leadId],            references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+  @@index([businessContextId])
+  @@index([leadId])
+  @@map("conversations")
+}
