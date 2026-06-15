@@ -8,6 +8,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // =============================================================================
@@ -245,4 +246,33 @@ model Conversation {
   @@index([businessContextId])
   @@index([leadId])
   @@map("conversations")
+}
+
+// =============================================================================
+// TWILIO — Inbound call tracking
+// One row per call. Status + duration arrive via the status-callback webhook.
+// transcript and leadId are nullable stubs ready for Phase 2 AI voice integration.
+// =============================================================================
+
+model Call {
+  id           String    @id @default(uuid()) @db.Uuid
+  callSid      String    @unique @db.VarChar(64)   // Twilio CA… identifier
+  from         String    @db.VarChar(20)            // E.164 caller number
+  to           String    @db.VarChar(20)            // our Twilio number
+  status       String    @default("initiated") @db.VarChar(30)
+  // Twilio statuses: initiated | ringing | in-progress | completed | busy | failed | no-answer | canceled
+  direction    String    @default("inbound") @db.VarChar(20)
+  startedAt    DateTime  @default(now()) @db.Timestamptz
+  endedAt      DateTime? @db.Timestamptz
+  duration     Int?      // call duration in seconds (arrives in status callback)
+  recordingUrl String?   // Phase 2: Twilio recording URL
+  transcript   Json?     // Phase 2: AI conversation [{role, text, timestamp}]
+  leadId       Int?      // Phase 2: FK to captured Lead (Phase 1 int PK)
+  createdAt    DateTime  @default(now()) @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @db.Timestamptz
+
+  @@index([callSid])
+  @@index([from])
+  @@index([startedAt])
+  @@map("calls")
 }

@@ -24,6 +24,7 @@ import knowledgeBaseRoutes from "./routes/knowledgeBase.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
 import demoRoutes from "./routes/demo.routes.js";
 import appAdminRoutes from "./routes/appAdmin.routes.js";
+import twilioRoutes from "./routes/twilio.routes.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { authenticate } from "./middleware/authenticate.js";
 import { requireRole } from "./middleware/requireRole.js";
@@ -47,14 +48,16 @@ app.use(
     })
 );
 app.use(helmet());
-app.use(globalLimiter);   // rate-check before body parsing — rejects bots without wasted CPU
-app.use(express.json());  // body parsing runs only for requests that cleared the global limit
+app.use(globalLimiter);                              // rate-check before body parsing — rejects bots without wasted CPU
+app.use(express.json());                             // parses application/json
+app.use(express.urlencoded({ extended: false }));    // parses application/x-www-form-urlencoded (required for Twilio webhooks)
 
 // ── Public routes ─────────────────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/invitations", invitationRoutes);
 app.use("/api/portal", portalRoutes);
 app.use("/api/demo", demoRoutes);
+app.use("/api/twilio", twilioRoutes);   // Twilio voice webhooks — signature-validated, no JWT
 app.use("/api/lead-extraction", authenticate, leadExtractionRoutes);
 
 // ── App Admin routes — require app_admin role ─────────────────────────────────

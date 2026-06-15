@@ -106,6 +106,16 @@ export const demoChatLimiter = rateLimit({
     limit:    20,
 });
 
+// ── Twilio webhooks ────────────────────────────────────────────────────────────
+// Server-to-server from Twilio's infrastructure — one event per call state
+// transition. 300 req / 15 min comfortably handles ~20 concurrent calls
+// (voice + status callback per call) while still blocking rogue traffic.
+export const twilioWebhookLimiter = rateLimit({
+    ...defaults,
+    windowMs: 15 * 60 * 1000,
+    limit:    300,
+});
+
 // ── Invitations ────────────────────────────────────────────────────────────────
 // Both validate and accept are public; limiting prevents token brute-forcing.
 //
