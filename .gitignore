@@ -1,2 +1,64 @@
+# ─── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ─── Environment / Secrets ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Build outputs ────────────────────────────────────────────────────────────
+dist/
+build/
+dist-ssr/
+.next/
+coverage/
+*.local
+
+# ─── Prisma ───────────────────────────────────────────────────────────────────
+prisma/*.db
+prisma/*.db-journal
+prisma/dev.db
+generated/
+
+# ─── Uploads / Temp / AI-generated content ────────────────────────────────────
+uploads/
+generated-knowledge/
+scraped-content/
+crawl-output/
+temp/
+tmp/
+exported-transcripts/
+training-exports/
+reports/
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ─── Cloud deployment ─────────────────────────────────────────────────────────
+.firebase/
+.vercel/
+.netlify/
+
+# ─── Local audit/debug scripts ────────────────────────────────────────────────
 audit_check.js
 audit_runtime.js

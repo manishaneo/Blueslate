@@ -1,0 +1,10 @@
+{
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  },
+  "scripts": {
+    "frontend": "npm run dev --prefix blueslate/frontend",
+    "backend": "npm run dev --prefix blueslate/backend",
+    "dev": "concurrently --kill-others-on-fail \"npm run frontend\" \"npm run backend\""
+  }
+}
