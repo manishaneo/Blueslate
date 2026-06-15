@@ -1,5 +1,7 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
+import { lookup } from "node:dns/promises";
+import { isIP, isIPv4, isIPv6 } from "node:net";
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
@@ -53,6 +55,104 @@ const SKIP_EXTENSIONS = new Set([
     ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
     ".css", ".js", ".json", ".xml", ".txt",
 ]);
+
+// ── SSRF protection ───────────────────────────────────────────────────────────
+
+/**
+ * Returns true if the IP falls in any private / loopback / link-local range.
+ * Handles IPv4, IPv6, and IPv4-mapped IPv6 (decimal and hex notation).
+ */
+function isPrivateIp(ip) {
+    if (isIPv6(ip)) {
+        if (ip === "::1") return true;                         // loopback
+        if (/^fe[89ab]/i.test(ip)) return true;               // fe80::/10 link-local
+        if (/^f[cd]/i.test(ip)) return true;                  // fc00::/7 unique-local
+
+        // IPv4-mapped ::ffff:a.b.c.d (decimal)
+        const v4dec = ip.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
+        if (v4dec) return isPrivateIp(v4dec[1]);
+
+        // IPv4-mapped ::ffff:aabb:ccdd (hex)
+        const v4hex = ip.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+        if (v4hex) {
+            const hi = parseInt(v4hex[1], 16);
+            const lo = parseInt(v4hex[2], 16);
+            return isPrivateIp(`${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`);
+        }
+
+        return false;
+    }
+
+    if (isIPv4(ip)) {
+        const [a, b] = ip.split(".").map(Number);
+        return (
+            a === 127 ||                          // 127.0.0.0/8  loopback
+            a === 10  ||                          // 10.0.0.0/8   private
+            a === 0   ||                          // 0.0.0.0/8
+            (a === 172 && b >= 16 && b <= 31) ||  // 172.16.0.0/12 private
+            (a === 192 && b === 168)           ||  // 192.168.0.0/16 private
+            (a === 169 && b === 254)               // 169.254.0.0/16 link-local / cloud metadata
+        );
+    }
+
+    return false;
+}
+
+/**
+ * Resolves the hostname of a user-supplied URL and throws if any resolved
+ * address falls in a private or loopback range (SSRF prevention).
+ * Must be called after URL normalisation and before any outbound HTTP request.
+ */
+async function validatePublicUrl(rawUrl) {
+    let parsed;
+    try {
+        parsed = new URL(rawUrl);
+    } catch {
+        throw new Error("Invalid URL.");
+    }
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error("Only HTTP and HTTPS URLs are allowed.");
+    }
+
+    // Strip IPv6 brackets — URL.hostname includes them for IPv6 literals.
+    const { hostname } = parsed;
+    const host = hostname.startsWith("[") && hostname.endsWith("]")
+        ? hostname.slice(1, -1)
+        : hostname;
+
+    // Reject obviously local names before DNS resolution.
+    if (host === "localhost" || host === "0.0.0.0" || host.endsWith(".local")) {
+        throw new Error("Local addresses are not allowed.");
+    }
+
+    // Literal IP — validate directly, no DNS round-trip needed.
+    if (isIP(host)) {
+        if (isPrivateIp(host)) {
+            throw new Error("Private network addresses are not allowed.");
+        }
+        return;
+    }
+
+    // Resolve DNS — { all: true } returns every address the OS resolver returns,
+    // using the same path Node's HTTP client uses for consistency.
+    let addresses;
+    try {
+        addresses = await lookup(host, { all: true });
+    } catch {
+        throw new Error(`Could not resolve hostname: ${host}`);
+    }
+
+    if (!addresses || addresses.length === 0) {
+        throw new Error(`Could not resolve hostname: ${host}`);
+    }
+
+    for (const { address } of addresses) {
+        if (isPrivateIp(address)) {
+            throw new Error("Private network addresses are not allowed.");
+        }
+    }
+}
 
 // ── fetch ─────────────────────────────────────────────────────────────────────
 
@@ -526,9 +626,13 @@ async function crawlPages(startUrl) {
                 bodyText,
             });
 
-            console.log(`[CRAWLER] ✓ (${pages.length}/${MAX_PAGES}) ${url}`);
+            if (process.env.NODE_ENV !== "production") {
+                console.log(`[CRAWLER] ✓ (${pages.length}/${MAX_PAGES}) ${url}`);
+            }
         } catch (err) {
-            console.warn(`[CRAWLER] ✗ Skipping ${url} — ${err.message}`);
+            if (process.env.NODE_ENV !== "production") {
+                console.warn(`[CRAWLER] ✗ Skipping ${url} — ${err.message}`);
+            }
         }
     }
 
@@ -541,6 +645,8 @@ export const extractWebsiteMetadata = async (websiteUrl) => {
     if (!websiteUrl.startsWith("http")) {
         websiteUrl = `https://${websiteUrl}`;
     }
+
+    await validatePublicUrl(websiteUrl);
 
     const pages = await crawlPages(websiteUrl);
 
@@ -610,15 +716,17 @@ export const extractWebsiteMetadata = async (websiteUrl) => {
 
     const crawledPages = pages.map((p) => p.url);
 
-    console.log("\n[CRAWLER AUDIT] ─────────────────────────────────");
-    console.log("[crawledPages]  ", crawledPages);
-    console.log("[services]      ", services.length      ? services      : "(empty)");
-    console.log("[programs]      ", programs.length      ? programs      : "(empty)");
-    console.log("[ageGroups]     ", ageGroups.length     ? ageGroups     : "(empty)");
-    console.log("[contactInfo]   ", contactInfo          ? contactInfo   : "(empty)");
-    console.log("[businessHours] ", businessHours        ? businessHours : "(empty)");
-    console.log("[faqs]          ", faqs.length          ? faqs          : "(empty)");
-    console.log("[CRAWLER AUDIT END] ───────────────────────────────\n");
+    if (process.env.NODE_ENV !== "production") {
+        console.log("\n[CRAWLER AUDIT] ─────────────────────────────────");
+        console.log("[crawledPages]  ", crawledPages);
+        console.log("[services]      ", services.length      ? services      : "(empty)");
+        console.log("[programs]      ", programs.length      ? programs      : "(empty)");
+        console.log("[ageGroups]     ", ageGroups.length     ? ageGroups     : "(empty)");
+        console.log("[contactInfo]   ", contactInfo          ? contactInfo   : "(empty)");
+        console.log("[businessHours] ", businessHours        ? businessHours : "(empty)");
+        console.log("[faqs]          ", faqs.length          ? faqs          : "(empty)");
+        console.log("[CRAWLER AUDIT END] ───────────────────────────────\n");
+    }
 
     return {
         title,

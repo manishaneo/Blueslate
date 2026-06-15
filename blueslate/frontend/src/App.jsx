@@ -1,11 +1,6 @@
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import LandingPage from "./pages/LandingPage";
-import ExperienceSelectorPage from "./pages/ExperienceSelectorPage";
-import SetupPage from "./pages/SetupPage";
-import AcceptInvitePage from "./pages/AcceptInvitePage";
 import BusinessSetupPage from "./pages/BusinessSetupPage";
-import ChatPage from "./pages/ChatPage";
-import ReceptionistPage from "./pages/ReceptionistPage";
 import AdminLayout from "./layouts/AdminLayout";
 import AppAdminLayout from "./layouts/AppAdminLayout";
 import AppAdminDashboardPage from "./pages/AppAdminDashboardPage";
@@ -25,17 +20,24 @@ import AdminLoginPage from "./pages/AdminLoginPage";
 import JoinPage from "./pages/JoinPage";
 import AddBusinessPage from "./pages/AddBusinessPage";
 import CustomerPortalPage from "./pages/CustomerPortalPage";
+import CustomerChatPage from "./pages/CustomerChatPage";
+import CustomerCallPage from "./pages/CustomerCallPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DisabledBusinessPage from "./pages/DisabledBusinessPage";
 import DemoPage from "./pages/DemoPage";
 
 const ADMIN_PATHS = ["/dashboard", "/leads", "/conversations", "/call-history", "/analytics", "/knowledge-base", "/settings", "/test-ai", "/app-admin"];
 // Pages that manage their own inline theme toggle — suppress the global floating button
-const NO_FLOAT_TOGGLE = new Set(["/", "/chat", "/receptionist", "/login", "/admin-login", "/join", "/business-setup", "/add-business", "/customer", "/disabled"]);
+const NO_FLOAT_TOGGLE = new Set(["/", "/login", "/admin-login", "/join", "/business-setup", "/add-business", "/customer", "/disabled", "/demo"]);
 
 function GlobalThemeToggle() {
     const { pathname } = useLocation();
-    if (NO_FLOAT_TOGGLE.has(pathname) || ADMIN_PATHS.some((p) => pathname.startsWith(p))) return null;
+    if (
+        NO_FLOAT_TOGGLE.has(pathname) ||
+        pathname.startsWith("/chat/") ||
+        pathname.startsWith("/receptionist/") ||
+        ADMIN_PATHS.some((p) => pathname.startsWith(p))
+    ) return null;
     return <ThemeToggle />;
 }
 
@@ -50,17 +52,12 @@ function App() {
                 <Route path="/admin-login" element={<AdminLoginPage />} />
                 <Route path="/disabled" element={<DisabledBusinessPage />} />
                 <Route path="/customer" element={<CustomerPortalPage />} />
+                <Route path="/chat/:token" element={<CustomerChatPage />} />
+                <Route path="/receptionist/:token" element={<CustomerCallPage />} />
 
-                {/* Onboarding + demo routes (public) */}
+                {/* Demo + onboarding (public) */}
                 <Route path="/demo" element={<DemoPage />} />
                 <Route path="/join" element={<JoinPage />} />
-                <Route path="/setup" element={<SetupPage />} />
-                <Route path="/experience" element={<ExperienceSelectorPage />} />
-                <Route path="/chat" element={<ChatPage />} />
-                <Route path="/receptionist" element={<ReceptionistPage />} />
-
-                {/* Invitation flow (public for now) */}
-                <Route path="/accept-invite" element={<AcceptInvitePage />} />
                 <Route path="/business-setup" element={<BusinessSetupPage />} />
 
                 {/* App Admin panel — requires app_admin role */}
@@ -73,9 +70,7 @@ function App() {
 
                 {/* Business Admin routes — requires business_admin role */}
                 <Route element={<ProtectedRoute allowedRoles={["business_admin"]} />}>
-                    {/* Full-screen flows — no sidebar */}
                     <Route path="/add-business" element={<AddBusinessPage />} />
-
                     <Route element={<AdminLayout />}>
                         <Route path="/dashboard" element={<DashboardPage />} />
                         <Route path="/leads" element={<LeadsPage />} />

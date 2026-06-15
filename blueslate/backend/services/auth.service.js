@@ -78,3 +78,20 @@ export async function loginUser({ email, password }) {
         businesses,
     };
 }
+
+// ── GET /api/auth/me/businesses ───────────────────────────────────────────────
+// Returns the caller's current business memberships with live status.
+// Used by the frontend to refresh stale localStorage data without re-logging in.
+
+export async function getMyBusinesses(userId) {
+    const memberships = await prisma.businessMember.findMany({
+        where:   { userId },
+        orderBy: { createdAt: "asc" },
+        select: {
+            business: {
+                select: { id: true, name: true, website: true, status: true },
+            },
+        },
+    });
+    return memberships.map((m) => m.business);
+}

@@ -33,6 +33,12 @@ export function getBusinesses() {
     return getCurrentUser()?.businesses ?? [];
 }
 
+export function getActiveBusiness() {
+    const user = getCurrentUser();
+    const activeId = user?.activeBusinessId;
+    return user?.businesses?.find((b) => b.id === activeId) ?? null;
+}
+
 // Accepts a role string ("business_admin") OR a full user object { id, email, role, ... }.
 // AcceptInvitePage and BusinessSetupPage pass a string; LoginPage passes the full object.
 export function setAuth(roleOrUser) {

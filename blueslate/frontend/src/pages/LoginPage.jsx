@@ -4,8 +4,7 @@ import { Eye, EyeOff, Sun, Moon } from "lucide-react";
 import axios from "axios";
 import { setAuth, setToken } from "../utils/auth";
 import { useTheme } from "../hooks/useTheme";
-
-const API_URL = "http://localhost:5000/api";
+import { API_BASE_URL } from "../utils/api";
 
 export default function LoginPage() {
     const navigate = useNavigate();
@@ -29,7 +28,7 @@ export default function LoginPage() {
 
         setLoading(true);
         try {
-            const { data } = await axios.post(`${API_URL}/auth/login`, {
+            const { data } = await axios.post(`${API_BASE_URL}/auth/login`, {
                 email:    email.trim().toLowerCase(),
                 password,
             });

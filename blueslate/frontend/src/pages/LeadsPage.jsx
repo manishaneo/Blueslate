@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mail, Copy, Check } from "lucide-react";
 import { getLeads, getDashboardStats, updateLeadStatus } from "../services/leadService";
+import { API_BASE_URL } from "../utils/api";
 
 // ── stat card definitions ────────────────────────────────────────────────────
 
@@ -298,7 +299,7 @@ export default function LeadsPage() {
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">All captured contacts</p>
                 </div>
                 <a
-                    href="http://localhost:5000/api/leads/export"
+                    href={`${API_BASE_URL}/leads/export`}
                     download="leads.csv"
                     className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 font-medium transition-colors shadow-sm"
                 >

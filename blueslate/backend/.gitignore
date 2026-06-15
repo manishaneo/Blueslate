@@ -1,7 +1,57 @@
-node_modules
-# Keep environment variables out of version control
+# ─── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─── Environment / Secrets ────────────────────────────────────────────────────
 .env
+.env.*
+!.env.example
 
-/generated/prisma
+# ─── Build outputs ────────────────────────────────────────────────────────────
+dist/
+build/
+coverage/
 
-/scripts
+# ─── Prisma generated / local DB ──────────────────────────────────────────────
+/generated/
+prisma/*.db
+prisma/*.db-journal
+prisma/dev.db
+
+# ─── Scripts (local tooling only) ─────────────────────────────────────────────
+/scripts/
+
+# ─── Uploads / Temp / AI-generated content ────────────────────────────────────
+uploads/
+generated-knowledge/
+scraped-content/
+crawl-output/
+temp/
+tmp/
+exported-transcripts/
+training-exports/
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+!.vscode/extensions.json
+.idea/
+
+# ─── Cloud deployment ─────────────────────────────────────────────────────────
+.firebase/
+.vercel/
+.netlify/
+
+# ─── Local audit/debug scripts ────────────────────────────────────────────────
+audit_check.js
+audit_runtime.js

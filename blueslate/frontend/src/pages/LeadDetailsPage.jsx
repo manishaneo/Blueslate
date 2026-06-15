@@ -6,6 +6,7 @@ import {
     MessageSquare, PhoneCall, Zap, Clock, Activity,
     CheckCircle2, XCircle, AlertCircle, MessageCircle, FileText,
 } from "lucide-react";
+import { API_BASE_URL } from "../utils/api";
 
 // ── lead source labels ────────────────────────────────────────────────────────
 
@@ -20,8 +21,6 @@ const LEAD_SOURCE_LABELS = {
     business_chat:         "Business Chat",
     receptionist:          "Receptionist",
 };
-
-const API_URL = "http://localhost:5000/api";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -199,7 +198,7 @@ export default function LeadDetailsPage() {
 
             // TODO: Future API — GET /api/leads/:id
             try {
-                const { data } = await axios.get(`${API_URL}/leads/${leadId}`);
+                const { data } = await axios.get(`${API_BASE_URL}/leads/${leadId}`);
                 const lead = data?.data ?? data;
                 const override = loadStatusOverride(leadId);
                 setLead(lead);
@@ -256,7 +255,7 @@ export default function LeadDetailsPage() {
 
         // TODO: Future API — PATCH /api/leads/:id/status
         try {
-            await axios.patch(`${API_URL}/leads/${leadId}/status`, { status: newStatus });
+            await axios.patch(`${API_BASE_URL}/leads/${leadId}/status`, { status: newStatus });
         } catch { /* persist locally; API will sync later */ }
 
         setUpdating(false);

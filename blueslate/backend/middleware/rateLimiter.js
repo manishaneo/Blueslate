@@ -72,7 +72,7 @@ export const portalChatTokenLimiter = rateLimit({
     ...defaults,
     windowMs:     10 * 60 * 1000,
     limit:        30,
-    keyGenerator: (req) => req.body?.conversationToken ?? req.ip,
+    keyGenerator: (req) => req.body?.conversationToken || req.ip,
 });
 
 export const portalFinalizeLimiter = rateLimit({

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Outlet, NavLink } from "react-router-dom";
+import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import {
     LayoutDashboard,
     Users,
@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "../hooks/useTheme";
 import { getCurrentUser, logout, setAuth } from "../utils/auth";
+import { refreshBusinesses } from "../services/authService";
 
 const NAV_ITEMS = [
     { label: "Dashboard",      path: "/dashboard",     Icon: LayoutDashboard },
@@ -170,7 +171,8 @@ function BusinessSwitcher({ businesses, activeBusinessId, onSelect }) {
                         </p>
                         <div className="space-y-0.5">
                             {businesses.map((business) => {
-                                const isActive = business.id === activeBusinessId;
+                                const isActive   = business.id === activeBusinessId;
+                                const isDisabled = business.status === "disabled";
                                 return (
                                     <button
                                         key={business.id}
@@ -191,6 +193,11 @@ function BusinessSwitcher({ businesses, activeBusinessId, onSelect }) {
                                             {business.name[0].toUpperCase()}
                                         </div>
                                         <span className="truncate font-medium flex-1">{business.name}</span>
+                                        {isDisabled && !isActive && (
+                                            <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-orange-500 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/50 px-1.5 py-0.5 rounded-full leading-3">
+                                                Disabled
+                                            </span>
+                                        )}
                                         {isActive && (
                                             <Check size={12} className="shrink-0 text-blue-600 dark:text-blue-400" />
                                         )}
@@ -244,29 +251,75 @@ function SidebarFooter({ user, businesses, activeBusinessId, onSwitch, onLogout,
 
 export default function AdminLayout() {
     const { dark, toggle } = useTheme();
+    const navigate         = useNavigate();
     const [drawerOpen, setDrawerOpen] = useState(false);
 
-    const user       = getCurrentUser();
-    const businesses = user?.businesses ?? [];
+    const user = getCurrentUser();
+
+    // Reactive businesses list — refreshed from the backend on mount and window focus
+    // so stale localStorage data (e.g., after App Admin re-enables a business) is resolved
+    // without the user having to log out.
+    const [businesses, setBusinesses] = useState(() => getCurrentUser()?.businesses ?? []);
 
     // React state so header breadcrumb and Outlet key stay reactive on switch
     const [activeBusinessId, setActiveBusinessId] = useState(user?.activeBusinessId ?? null);
+
+    // Refresh business statuses from the backend. If the current active business
+    // was disabled mid-session (admin action), redirect immediately.
+    useEffect(() => {
+        const refresh = async () => {
+            try {
+                const fresh = await refreshBusinesses();
+                setBusinesses(fresh);
+                const currentActiveId = getCurrentUser()?.activeBusinessId;
+                const nowActive = fresh.find((b) => b.id === currentActiveId);
+                if (nowActive?.status === "disabled") {
+                    navigate("/disabled", { replace: true });
+                }
+            } catch {
+                // Network error or 401 — leave stale data in place, don't crash
+            }
+        };
+        refresh();
+        window.addEventListener("focus", refresh);
+        return () => window.removeEventListener("focus", refresh);
+    }, [navigate]);
 
     const activeBusiness = businesses.find((b) => b.id === activeBusinessId);
     const businessName   = activeBusiness?.name ?? user?.businessName ?? "";
 
     const closeDrawer = () => setDrawerOpen(false);
 
-    const handleSwitch = (business) => {
-        // Persist to localStorage first so api.js interceptor picks it up immediately
+    const handleSwitch = async (business) => {
+        // Persist to localStorage first so the api.js interceptor picks it up immediately
         const current = getCurrentUser();
         setAuth({
             ...current,
             activeBusinessId: business.id,
             businessName:     business.name,
         });
-        // Update React state: triggers breadcrumb update + Outlet remount via key
-        setActiveBusinessId(business.id);
+
+        if (business.status === "disabled") {
+            // The "disabled" flag comes from the businesses state rendered into the dropdown,
+            // which may be stale (e.g. the admin re-enabled the business after our last
+            // refresh but before this click). Verify live status before redirecting.
+            try {
+                const fresh = await refreshBusinesses();
+                setBusinesses(fresh);
+                const latest = fresh.find((b) => b.id === business.id);
+                if (latest?.status !== "disabled") {
+                    // Business was re-enabled — load the dashboard normally
+                    setActiveBusinessId(business.id);
+                    return;
+                }
+            } catch {
+                // Refresh failed — fall through to /disabled as a safe default
+            }
+            navigate("/disabled", { replace: true });
+        } else {
+            // Update React state: triggers breadcrumb update + Outlet remount via key
+            setActiveBusinessId(business.id);
+        }
     };
 
     const footerProps = {

@@ -3,10 +3,8 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowRight, ArrowLeft, CheckCircle2, Loader2, Moon, Sun } from "lucide-react";
 import axios from "axios";
 import { setAuth, setToken } from "../utils/auth";
-import api from "../utils/api";
+import api, { API_BASE_URL } from "../utils/api";
 import { useTheme } from "../hooks/useTheme";
-
-const API_URL = "http://localhost:5000/api";
 
 // ── Wordmark ──────────────────────────────────────────────────────────────────
 
@@ -112,7 +110,7 @@ export default function BusinessSetupPage() {
             // Step 1: Register (skipped on retry if already completed)
             if (!registered) {
                 setPhase("registering");
-                const { data } = await axios.post(`${API_URL}/auth/register`, {
+                const { data } = await axios.post(`${API_BASE_URL}/auth/register`, {
                     ownerName:    location.state.ownerName,
                     businessName: location.state.businessName,
                     email:        location.state.email,

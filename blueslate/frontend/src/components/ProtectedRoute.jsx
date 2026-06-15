@@ -1,5 +1,5 @@
 import { Navigate, Outlet } from "react-router-dom";
-import { getCurrentRole, getCurrentUser } from "../utils/auth";
+import { getCurrentRole, getActiveBusiness } from "../utils/auth";
 
 export default function ProtectedRoute({ allowedRoles = [] }) {
     const role = getCurrentRole();
@@ -13,11 +13,8 @@ export default function ProtectedRoute({ allowedRoles = [] }) {
         return <Navigate to={role === "app_admin" ? "/app-admin" : "/dashboard"} replace />;
     }
 
-    if (role === "business_admin") {
-        const user = getCurrentUser();
-        if (user?.business?.status === "disabled") {
-            return <Navigate to="/disabled" replace />;
-        }
+    if (role === "business_admin" && getActiveBusiness()?.status === "disabled") {
+        return <Navigate to="/disabled" replace />;
     }
 
     return <Outlet />;

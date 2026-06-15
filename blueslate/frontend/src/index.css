@@ -2,3 +2,21 @@
 
 /* Enable class-based dark mode for Tailwind v4 */
 @variant dark (&:where(.dark, .dark *));
+
+/* ── Portal scrollbar — adapts to dark/light mode ───────────────────────────── */
+.portal-scrollbar::-webkit-scrollbar          { width: 6px; }
+.portal-scrollbar::-webkit-scrollbar-track    { background: transparent; }
+.portal-scrollbar::-webkit-scrollbar-thumb    { background: #d1d5db; border-radius: 9999px; }
+.portal-scrollbar::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+.portal-scrollbar { scrollbar-width: thin; scrollbar-color: #d1d5db transparent; }
+
+.dark .portal-scrollbar::-webkit-scrollbar-thumb       { background: #334155; }
+.dark .portal-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
+.dark .portal-scrollbar { scrollbar-color: #334155 transparent; }
+
+/* ── Portal scrollbar dark-always — for always-dark call screen ─────────────── */
+.portal-scrollbar-dark::-webkit-scrollbar          { width: 6px; }
+.portal-scrollbar-dark::-webkit-scrollbar-track    { background: #0f172a; }
+.portal-scrollbar-dark::-webkit-scrollbar-thumb    { background: #334155; border-radius: 9999px; }
+.portal-scrollbar-dark::-webkit-scrollbar-thumb:hover { background: #475569; }
+.portal-scrollbar-dark { scrollbar-width: thin; scrollbar-color: #334155 #0f172a; }

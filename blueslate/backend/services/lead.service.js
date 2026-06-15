@@ -26,7 +26,16 @@ async function resolveContextIds(userId, activeBusinessId) {
 // Internal use only — caller must supply a server-resolved businessContextId.
 // Used by chat.service, which already resolves the context before calling this.
 export const createLead = async (data) => {
-    return prisma.lead.create({ data });
+    console.log("[portal-debug] createLead called | payload:", JSON.stringify(data));
+    try {
+        const result = await prisma.lead.create({ data });
+        console.log("[portal-debug] createLead succeeded | id:", result.id);
+        return result;
+    } catch (err) {
+        console.error("[portal-debug] createLead FAILED (full error):", err);
+        if (err?.stack) console.error("[portal-debug] createLead stack:", err.stack);
+        throw err;
+    }
 };
 
 /**

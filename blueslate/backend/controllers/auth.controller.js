@@ -1,5 +1,16 @@
-import { loginUser } from "../services/auth.service.js";
+import { loginUser, getMyBusinesses } from "../services/auth.service.js";
 import { signToken } from "../utils/jwt.js";
+
+// ── GET /api/auth/me/businesses ───────────────────────────────────────────────
+
+export const getMyBusinessesHandler = async (req, res, next) => {
+    try {
+        const businesses = await getMyBusinesses(req.user.id);
+        return res.json({ success: true, data: businesses });
+    } catch (err) {
+        next(err);
+    }
+};
 
 // ── POST /api/auth/login ──────────────────────────────────────────────────────
 
