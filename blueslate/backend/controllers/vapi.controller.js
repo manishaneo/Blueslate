@@ -5,22 +5,42 @@ import { generateGroqAnswer } from "../services/groq.service.js";
 /**
  * POST /api/vapi/tool
  *
- * Handles VAPI function/tool calls during a voice conversation.
- * VAPI calls this when the assistant needs to answer a caller question
- * about business information.
+ * Handles both VAPI tool payload formats:
  *
- * Business identification priority:
- *   1. call.metadata.businessId  — injected when Twilio creates the VAPI call
- *   2. VAPI_TEST_BUSINESS_ID env var — for VAPI dashboard "Talk" button testing
- *   3. Most recent BusinessContext row — last-resort fallback
+ *   API Request Tool (current):
+ *     Body: { query: "..." }
+ *     Response: { result: "..." }
+ *
+ *   Function/Webhook Tool (future Twilio integration):
+ *     Body: { message: { type: "tool-calls", toolCallList: [...] } }
+ *     Response: { results: [{ toolCallId, result }] }
  */
 export async function handleVapiToolCall(req, res) {
-    const { message } = req.body;
+    // Log raw body FIRST — before any conditional — so we always see what VAPI sends
+    console.log("[VAPI] ===== INCOMING REQUEST =====");
+    console.log("[VAPI] Body:", JSON.stringify(req.body, null, 2));
+    console.log("[VAPI] ==============================");
 
-    if (!message || message.type !== "tool-calls") {
-        return res.status(400).json({ error: "Expected message.type === 'tool-calls'" });
+    // Detect which VAPI tool format was used
+    if (req.body?.message?.type === "tool-calls") {
+        return _handleWebhookFormat(req, res);
     }
 
+    // VAPI API Request Tool — parameters arrive at root level: { query: "..." }
+    return _handleApiRequestFormat(req, res);
+}
+
+async function _handleApiRequestFormat(req, res) {
+    console.log("[VAPI] Format: API Request Tool");
+    const query = req.body?.query;
+    const result = await _handleGetBusinessInfo(null, query);
+    console.log("[VAPI] Responding with result:", result);
+    return res.json({ result });
+}
+
+async function _handleWebhookFormat(req, res) {
+    console.log("[VAPI] Format: Webhook/Function Tool");
+    const { message } = req.body;
     const toolCallList = message.toolCallList ?? [];
     const results = [];
 
@@ -80,7 +100,6 @@ async function _handleGetBusinessInfo(call, query) {
         return answer;
     } catch (err) {
         console.error("[VAPI FULL ERROR]", err);
-
         return `DEBUG ERROR: ${err.message}`;
     }
 }
@@ -89,24 +108,28 @@ async function _resolveBusinessContext(call) {
     // 1. Prefer businessId from call metadata (set by Twilio webhook when routing to VAPI)
     const metaBusinessId = call?.metadata?.businessId;
     if (metaBusinessId) {
-        console.log(`[VAPI] resolving business via call metadata: ${metaBusinessId}`);
-        return prisma.businessContext.findFirst({
+        console.log(`[VAPI] resolving via call metadata: ${metaBusinessId}`);
+        const ctx = await prisma.businessContext.findFirst({
             where:   { businessId: metaBusinessId },
             orderBy: { createdAt: "desc" },
         });
+        if (ctx) return ctx;
+        console.log("[VAPI] WARNING: call metadata businessId matched no row, falling through");
     }
 
     // 2. VAPI dashboard "Talk" button testing — pin to a specific business via env var
     const testBusinessId = process.env.VAPI_TEST_BUSINESS_ID;
     if (testBusinessId) {
-        console.log(`[VAPI] resolving business via VAPI_TEST_BUSINESS_ID: ${testBusinessId}`);
-        return prisma.businessContext.findFirst({
+        console.log(`[VAPI] resolving via VAPI_TEST_BUSINESS_ID: ${testBusinessId}`);
+        const ctx = await prisma.businessContext.findFirst({
             where:   { businessId: testBusinessId },
             orderBy: { createdAt: "desc" },
         });
+        if (ctx) return ctx;
+        console.log("[VAPI] WARNING: VAPI_TEST_BUSINESS_ID matched no row, falling through to most-recent");
     }
 
-    // 3. Last-resort: most recent business context (single-tenant / dev only)
-    console.log("[VAPI] resolving business via fallback (most recent BusinessContext)");
+    // 3. Fallback: most recent BusinessContext row
+    console.log("[VAPI] resolving via fallback (most recent BusinessContext)");
     return prisma.businessContext.findFirst({ orderBy: { createdAt: "desc" } });
 }
