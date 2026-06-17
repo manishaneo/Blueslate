@@ -2,6 +2,7 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import { lookup } from "node:dns/promises";
 import { isIP, isIPv4, isIPv6 } from "node:net";
+import { scrapeWebsiteWithFirecrawl } from "./firecrawl.service.js";
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
@@ -647,6 +648,16 @@ export const extractWebsiteMetadata = async (websiteUrl) => {
     }
 
     await validatePublicUrl(websiteUrl);
+
+    // Firecrawl handles JS-rendered (React/Next.js/etc.) sites that cheerio cannot.
+    // Used automatically when FIRECRAWL_API_KEY is present in the environment.
+    const firecrawlResult = await scrapeWebsiteWithFirecrawl(websiteUrl);
+    if (firecrawlResult) {
+        console.log("[SCRAPER] Firecrawl succeeded. content length:", firecrawlResult.content.length);
+        return firecrawlResult;
+    }
+
+    console.log("[SCRAPER] Using cheerio crawler (Firecrawl unavailable or failed)");
 
     const pages = await crawlPages(websiteUrl);
 

@@ -100,10 +100,13 @@ export async function handleGather(req, res) {
             return res.type("text/xml").send(response.toString());
         }
 
-        // Resolve business context — use env var for explicit binding, else fall back to most recent.
+        // Resolve business context — explicit env var binding, else most recent row with content.
         const businessContext = process.env.TWILIO_BUSINESS_CONTEXT_ID
-            ? await prisma.businessContext.findUnique({ where: { id: process.env.TWILIO_BUSINESS_CONTEXT_ID } })
-            : await prisma.businessContext.findFirst({ orderBy: { createdAt: "desc" } });
+            ? await prisma.businessContext.findUnique({ where: { id: Number(process.env.TWILIO_BUSINESS_CONTEXT_ID) } })
+            : await prisma.businessContext.findFirst({
+                where:   { content: { not: null }, AND: { content: { not: "" } } },
+                orderBy: { createdAt: "desc" },
+            });
 
         if (!businessContext?.content) {
             response.say({ voice }, "I'm sorry, I don't have business information loaded yet. Please call back later. Goodbye!");

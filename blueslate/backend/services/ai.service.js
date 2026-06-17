@@ -123,6 +123,10 @@ const SYNONYM_MAP = {
     "offer":    ["service", "services", "program", "class"],
     "provide":  ["service", "services", "program"],
     "help":     ["service", "services", "consultation"],
+    // games / activities
+    "games":    ["program", "class", "league", "activity", "sport", "session"],
+    "play":     ["program", "class", "session", "league"],
+    "sport":    ["program", "class", "league", "activity"],
 };
 
 // Lightweight suffix-stripping stemmer — collapses common inflections so
@@ -231,11 +235,25 @@ function formatParagraph(p) {
     return p;
 }
 
+// Known abbreviations whose trailing period must NOT trigger a sentence split.
+const ABBREV_RE = /\b(?:Mr|Mrs|Ms|Dr|Jr|Sr|Bros|St|Ave|Blvd|vs|etc|approx|est|Corp|Inc|Ltd|Co)\.\s*$/i;
+
 // Split a paragraph into individual sentences on . ! ?
+// Merges back any fragment that follows a known abbreviation so that
+// e.g. "Super Smash Bros. Ultimate" is not split into two pieces.
 function splitSentences(text) {
     const raw = text.match(/[^.!?]+[.!?]+(?=\s|$)/g);
     if (!raw || raw.length === 0) return [text];
-    return raw.map((s) => s.trim()).filter((s) => s.length > 0);
+
+    const merged = [];
+    for (const s of raw) {
+        if (merged.length > 0 && ABBREV_RE.test(merged[merged.length - 1])) {
+            merged[merged.length - 1] += " " + s.trim();
+        } else {
+            merged.push(s.trim());
+        }
+    }
+    return merged.filter((s) => s.length > 0);
 }
 
 // Count how many stemmed question keywords appear in a sentence
@@ -249,6 +267,9 @@ function isNoiseSentence(sentence) {
     if (/[|»›·—–]/.test(sentence)) return true;
     if (tokenize(sentence).length < 4) return true;
     if (/^(?:read more|share|tags?|categor|author|posted|filed|related|see also|click here|learn more|subscribe|follow us)/i.test(sentence)) return true;
+    // Drop the Q: half of merged FAQ pairs — it scores high on question keywords
+    // but is just the question repeated; only the A: answer contains useful content.
+    if (/^Q:/i.test(sentence)) return true;
     return false;
 }
 
