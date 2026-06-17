@@ -101,6 +101,10 @@ export async function retrainKnowledgeBase(userId, activeBusinessId) {
         throw new AppError("Website unreachable. Please check the URL.", 500);
     }
 
+    console.log("[RETRAIN] title:", metadata.title);
+    console.log("[RETRAIN] content length:", metadata.content?.length ?? "NULL");
+    console.log("[RETRAIN] bodyText preview:", metadata.content?.slice(0, 200));
+
     const now = new Date();
 
     const existing = await prisma.businessContext.findFirst({

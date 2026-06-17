@@ -143,13 +143,19 @@ function stem(word) {
         ["ed",    ""],
         ["er",    ""],
         ["ly",    ""],
-        ["es",    ""],
     ];
 
     for (const [suffix, replacement] of rules) {
         if (word.endsWith(suffix) && word.length - suffix.length >= 3) {
             return word.slice(0, -suffix.length) + replacement;
         }
+    }
+    // "es" handling: only strip both chars when the base is ≥ 4 chars AND doesn't end
+    // in a vowel. This keeps game/games, league/leagues on the same stem instead of
+    // producing mismatched "gam" and "leagu".
+    if (word.endsWith("es") && word.length - 2 >= 4) {
+        const base = word.slice(0, -2);
+        if (!/[aeiou]$/.test(base)) return base;
     }
     if (word.endsWith("s") && !word.endsWith("ss") && word.length > 4) {
         return word.slice(0, -1);
@@ -247,13 +253,18 @@ function isNoiseSentence(sentence) {
 }
 
 export const askGemini = async (businessContent, question) => {
-    // 1. Split into paragraphs; discard short fragments and exact duplicates
+    // 1. Split into paragraphs; discard short fragments and exact duplicates.
+    //    Pre-process: merge Q:/A: FAQ pairs into one paragraph so the question
+    //    keywords are scored alongside the answer (Q lines alone are too short
+    //    to pass the word-count filter and would otherwise be dropped).
+    const preprocessed = businessContent.replace(/^(Q:[^\n]+)\n+(A:[^\n]+)/gm, "$1 $2");
+
     const paragraphs = [
         ...new Set(
-            businessContent
+            preprocessed
                 .split(/\n+/)
                 .map((p) => p.trim())
-                .filter((p) => tokenize(p).length >= MIN_PARAGRAPH_WORDS || /^[A-Z][A-Za-z ]+:/.test(p))
+                .filter((p) => tokenize(p).length >= MIN_PARAGRAPH_WORDS || /^[A-Z][A-Za-z ]*:/.test(p))
         ),
     ];
 

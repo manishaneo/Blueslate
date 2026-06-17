@@ -62,3 +62,4 @@ Thumbs.db
 # ─── Local audit/debug scripts ────────────────────────────────────────────────
 audit_check.js
 audit_runtime.js
+inspect-contexts.mjs

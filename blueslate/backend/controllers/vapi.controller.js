@@ -113,7 +113,10 @@ async function _resolveBusinessContext(call) {
             where:   { businessId: metaBusinessId },
             orderBy: { createdAt: "desc" },
         });
-        if (ctx) return ctx;
+        if (ctx) {
+            console.log(`[VAPI] Selected row — id: ${ctx.id}, businessId: ${ctx.businessId}, createdAt: ${ctx.createdAt}`);
+            return ctx;
+        }
         console.log("[VAPI] WARNING: call metadata businessId matched no row, falling through");
     }
 
@@ -125,11 +128,19 @@ async function _resolveBusinessContext(call) {
             where:   { businessId: testBusinessId },
             orderBy: { createdAt: "desc" },
         });
-        if (ctx) return ctx;
+        if (ctx) {
+            console.log(`[VAPI] Selected row — id: ${ctx.id}, businessId: ${ctx.businessId}, createdAt: ${ctx.createdAt}`);
+            return ctx;
+        }
         console.log("[VAPI] WARNING: VAPI_TEST_BUSINESS_ID matched no row, falling through to most-recent");
     }
 
-    // 3. Fallback: most recent BusinessContext row
-    console.log("[VAPI] resolving via fallback (most recent BusinessContext)");
-    return prisma.businessContext.findFirst({ orderBy: { createdAt: "desc" } });
+    // 3. Fallback: most recent BusinessContext row that actually has content
+    console.log("[VAPI] resolving via fallback (most recent non-empty BusinessContext)");
+    const fallback = await prisma.businessContext.findFirst({
+        where:   { content: { not: null }, AND: { content: { not: "" } } },
+        orderBy: { createdAt: "desc" },
+    });
+    console.log(`[VAPI] Selected row — id: ${fallback?.id}, businessId: ${fallback?.businessId}, createdAt: ${fallback?.createdAt}`);
+    return fallback;
 }
