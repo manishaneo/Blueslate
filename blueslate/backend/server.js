@@ -25,6 +25,7 @@ import analyticsRoutes from "./routes/analytics.routes.js";
 import demoRoutes from "./routes/demo.routes.js";
 import appAdminRoutes from "./routes/appAdmin.routes.js";
 import twilioRoutes from "./routes/twilio.routes.js";
+import vapiRoutes from "./routes/vapi.routes.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { authenticate } from "./middleware/authenticate.js";
 import { requireRole } from "./middleware/requireRole.js";
@@ -58,6 +59,7 @@ app.use("/api/invitations", invitationRoutes);
 app.use("/api/portal", portalRoutes);
 app.use("/api/demo", demoRoutes);
 app.use("/api/twilio", twilioRoutes);   // Twilio voice webhooks — signature-validated, no JWT
+app.use("/api/vapi", vapiRoutes);       // VAPI tool call webhook — no JWT, called by VAPI during voice conversations
 app.use("/api/lead-extraction", authenticate, leadExtractionRoutes);
 
 // ── App Admin routes — require app_admin role ─────────────────────────────────

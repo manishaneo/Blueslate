@@ -1,5 +1,8 @@
 import twilio from "twilio";
 import { createCallRecord, updateCallRecord } from "../services/twilio.service.js";
+import { askGemini } from "../services/ai.service.js";
+import { generateGroqAnswer } from "../services/groq.service.js";
+import prisma from "../prismaClient.js";
 
 const VoiceResponse = twilio.twiml.VoiceResponse;
 
@@ -79,24 +82,46 @@ export async function handleInboundCall(req, res) {
  *          then open another <Gather> to continue the conversation loop.
  */
 export async function handleGather(req, res) {
-    const { CallSid, SpeechResult, Digits } = req.body;
-    const response = new VoiceResponse();
+    const { CallSid, SpeechResult } = req.body;
+    const response    = new VoiceResponse();
+    const voice       = "Polly.Joanna";
+    const gatherAction = _webhookUrl(req, "/api/twilio/voice/gather");
 
-    console.log(`[Twilio] Gather input ${CallSid} — speech="${SpeechResult}" digits="${Digits}"`);
+    console.log(`[Twilio] Gather ${CallSid} — speech="${SpeechResult}"`);
 
     try {
-        const agentName = process.env.TWILIO_RECEPTIONIST_NAME || "Auri";
-        const voice     = "Polly.Joanna";
+        const input = SpeechResult?.trim();
 
-        // Phase 2: replace this block with an AI call.
-        //   const aiReply = await getAiVoiceResponse(SpeechResult, CallSid);
-        //   response.say({ voice }, aiReply);
-        //   const gather = response.gather({ ... });  // keep the conversation loop alive
-        response.say(
-            { voice },
-            `Thank you for calling. ${agentName} is currently being upgraded with full AI capabilities. Please call back soon. Goodbye!`,
-        );
+        if (!input) {
+            const gather = response.gather({ input: "speech dtmf", timeout: 5, speechTimeout: "auto", action: gatherAction, method: "POST" });
+            gather.say({ voice }, "Sorry, I didn't catch that. Could you say that again?");
+            response.say({ voice }, "No response received. Goodbye!");
+            response.hangup();
+            return res.type("text/xml").send(response.toString());
+        }
+
+        // Resolve business context — use env var for explicit binding, else fall back to most recent.
+        const businessContext = process.env.TWILIO_BUSINESS_CONTEXT_ID
+            ? await prisma.businessContext.findUnique({ where: { id: process.env.TWILIO_BUSINESS_CONTEXT_ID } })
+            : await prisma.businessContext.findFirst({ orderBy: { createdAt: "desc" } });
+
+        if (!businessContext?.content) {
+            response.say({ voice }, "I'm sorry, I don't have business information loaded yet. Please call back later. Goodbye!");
+            response.hangup();
+            return res.type("text/xml").send(response.toString());
+        }
+
+        const retrieved = await askGemini(businessContext.content, input);
+        const aiReply   = await generateGroqAnswer(retrieved, input, businessContext.title ?? "");
+
+        response.say({ voice }, aiReply);
+
+        const gather = response.gather({ input: "speech dtmf", timeout: 5, speechTimeout: "auto", action: gatherAction, method: "POST" });
+        gather.say({ voice }, "Is there anything else I can help you with?");
+
+        response.say({ voice }, "Thank you for calling. Goodbye!");
         response.hangup();
+
     } catch (err) {
         console.error("[Twilio] Error in handleGather:", err);
         _fallbackTwiml(response);
