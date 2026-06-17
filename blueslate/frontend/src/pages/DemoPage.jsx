@@ -1,35 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { API_BASE_URL } from "../utils/api";
 import {
     ArrowLeft, LayoutDashboard, Moon, Sun, Phone, ExternalLink,
-    BarChart2, CheckCircle2, Clock, User, PhoneCall, MessageSquare,
+    BarChart2, CheckCircle2, Clock, User, PhoneCall, MessageSquare, Loader2,
 } from "lucide-react";
 import { useTheme } from "../hooks/useTheme";
 import AgentStatusBadge from "../components/AgentStatusBadge";
-
-// ── Mock data (replace with real API calls when Twilio is connected) ──────────
-const MOCK_CALLS = [
-    { caller: "Rahul Sharma",  phone: "+91 98765 43210", duration: "3m 42s", time: "Today, 2:15 PM"      },
-    { caller: "Priya Nair",    phone: "+91 87654 32109", duration: "2m 18s", time: "Today, 11:40 AM"     },
-    { caller: "Arjun Mehta",   phone: "+91 76543 21098", duration: "5m 07s", time: "Yesterday, 4:30 PM"  },
-    { caller: "Sneha Kapoor",  phone: "+91 65432 10987", duration: "1m 55s", time: "Yesterday, 10:05 AM" },
-];
-
-const MOCK_LEADS = [
-    { name: "Rahul Sharma",  phone: "+91 98765 43210", interest: "Season Membership", status: "Hot"  },
-    { name: "Priya Nair",    phone: "+91 87654 32109", interest: "Trial Class",        status: "Warm" },
-    { name: "Arjun Mehta",   phone: "+91 76543 21098", interest: "Birthday Party",     status: "Hot"  },
-    { name: "Sneha Kapoor",  phone: "+91 65432 10987", interest: "General Inquiry",    status: "Cold" },
-];
-
-const MOCK_TRANSCRIPT = [
-    { role: "ai",   text: "Hi, thank you for calling XP League Frisco. This is Auri, your AI receptionist. How may I help you today?" },
-    { role: "user", text: "Hi, I'm interested in signing up my kids for soccer. What programs do you have?" },
-    { role: "ai",   text: "That's great! We offer recreational leagues for ages 4–16, competitive travel teams, and skill-development academies. Are your kids beginners or have they played before?" },
-    { role: "user", text: "They're beginners, ages 7 and 9." },
-    { role: "ai",   text: "Perfect! Our Rookie League is ideal for that age group — it focuses on fundamentals in a fun environment. Sessions run on Saturday mornings. Would you like me to capture your contact details so our coach can reach out with enrollment dates?" },
-    { role: "user", text: "Yes please, that would be great." },
-    { role: "ai",   text: "Wonderful! Could I get your name and best phone number?" },
-];
 
 const LEAD_STATUS_STYLES = {
     Hot:  "bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 border-red-200 dark:border-red-500/20",
@@ -37,12 +13,73 @@ const LEAD_STATUS_STYLES = {
     Cold: "bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/20",
 };
 
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function formatDuration(secs) {
+    if (secs == null) return "—";
+    return `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, "0")}s`;
+}
+
+function formatCallTime(iso) {
+    if (!iso) return "—";
+    const d   = new Date(iso);
+    const now = new Date();
+    const t   = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    if (d.toDateString() === now.toDateString()) return `Today, ${t}`;
+    const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+    if (d.toDateString() === yest.toDateString()) return `Yesterday, ${t}`;
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + `, ${t}`;
+}
+
+async function fetchDemoInfo() {
+    try {
+        const res  = await fetch(`${API_BASE_URL}/demo/info`);
+        const json = await res.json();
+        return json.success ? json.data : null;
+    } catch {
+        return null;
+    }
+}
+
 export default function DemoPage() {
     const { dark, toggle } = useTheme();
-    const [view, setView]  = useState("home"); // "home" | "dashboard"
+    const [view, setView]  = useState("home");
 
-    // Replace with Twilio call-started / call-ended webhook events when ready
-    const [agentStatus, setAgentStatus] = useState("available"); // "available" | "busy"
+    const [demoData, setDemoData] = useState(null);
+    const [loading,  setLoading]  = useState(true);
+    const [seeding,  setSeeding]  = useState(false);
+    const [selectedCall, setSelectedCall] = useState(null);
+
+    useEffect(() => {
+        async function load() {
+            setLoading(true);
+
+            // Step 1 — fetch existing info
+            let info = await fetchDemoInfo();
+
+            // Step 2 — no BusinessContext yet: seed XP League (15–45 s first time)
+            if (!info?.businessName) {
+                setSeeding(true);
+                await fetch(`${API_BASE_URL}/demo/seed`, { method: "POST" }).catch(() => {});
+                setSeeding(false);
+
+                // Step 3 — refetch after seed
+                info = await fetchDemoInfo();
+            }
+
+            setDemoData(info);
+            setLoading(false);
+        }
+        load();
+    }, []);
+
+    const businessName = demoData?.businessName ?? "XP League Frisco";
+    const phoneNumber  = demoData?.phoneNumber  ?? null;
+    const leadCount    = demoData?.leadCount    ?? 0;
+    const recentLeads  = demoData?.recentLeads  ?? [];
+    const recentCalls  = demoData?.recentCalls  ?? [];
+    const agentStatus     = demoData?.agentStatus     ?? "available";
+    const activeCallCount = demoData?.activeCallCount ?? 0;
 
     return (
         <div className="min-h-screen bg-white dark:bg-[#060c17] flex flex-col antialiased">
@@ -99,7 +136,7 @@ export default function DemoPage() {
                                 Live AI Receptionist Demo
                             </div>
                             <h1 className="text-3xl sm:text-4xl font-black text-gray-900 dark:text-white tracking-tight leading-tight mb-2">
-                                XP League Frisco
+                                {businessName}
                             </h1>
                             <p className="text-gray-500 dark:text-gray-400 text-sm">
                                 AI Receptionist Demo
@@ -125,6 +162,11 @@ export default function DemoPage() {
                                         AI Status
                                     </p>
                                     <AgentStatusBadge status={agentStatus} />
+                                    {activeCallCount > 0 && (
+                                        <p className="text-xs text-red-500 dark:text-red-400 font-medium">
+                                            {activeCallCount} active call{activeCallCount !== 1 ? "s" : ""}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
 
@@ -137,9 +179,17 @@ export default function DemoPage() {
                                     <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center shadow shadow-blue-600/30">
                                         <Phone size={14} className="text-white" />
                                     </div>
-                                    <span className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
-                                        +91 XXXXXXXXXX
-                                    </span>
+
+                                    {loading || seeding ? (
+                                        <span className="flex items-center gap-2 text-sm text-gray-400 dark:text-gray-500">
+                                            <Loader2 size={16} className="animate-spin" />
+                                            {seeding ? "Preparing demo…" : "Loading…"}
+                                        </span>
+                                    ) : (
+                                        <span className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
+                                            {phoneNumber ?? "Not configured"}
+                                        </span>
+                                    )}
                                 </div>
                                 <p className="text-xs text-gray-400 dark:text-gray-500 max-w-xs mx-auto">
                                     Call this number from your phone to speak with the AI receptionist.
@@ -153,7 +203,7 @@ export default function DemoPage() {
                                     className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-bold transition-colors shadow-lg shadow-blue-600/20"
                                 >
                                     <BarChart2 size={15} />
-                                    View XP League Dashboard
+                                    View {businessName} Dashboard
                                 </button>
                                 <a
                                     href="https://xpleague.com"
@@ -176,7 +226,7 @@ export default function DemoPage() {
 
                     <div className="mb-8">
                         <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
-                            XP League Dashboard
+                            {businessName} Dashboard
                         </h2>
                         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                             Live activity from your AI receptionist
@@ -187,73 +237,99 @@ export default function DemoPage() {
 
                         {/* ── Call History ─────────────────────────────────────── */}
                         <section>
-                            <SectionHeader icon={PhoneCall} title="Call History" count={MOCK_CALLS.length} unit="calls" />
+                            <SectionHeader icon={PhoneCall} title="Call History" count={recentCalls.length} unit="calls" />
                             <div className="bg-white dark:bg-[#0d1420] border border-gray-200 dark:border-white/10 rounded-2xl shadow-sm overflow-x-auto">
-                                <table className="w-full text-sm min-w-[540px]">
-                                    <TableHead cols={["Caller", "Phone Number", "Duration", "Time"]} />
-                                    <tbody className="divide-y divide-gray-50 dark:divide-white/5">
-                                        {MOCK_CALLS.map((row, i) => (
-                                            <tr key={i} className="hover:bg-gray-50 dark:hover:bg-white/3 transition-colors">
-                                                <td className="px-5 py-3.5 font-medium text-gray-900 dark:text-white">{row.caller}</td>
-                                                <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400 font-mono text-xs">{row.phone}</td>
-                                                <td className="px-5 py-3.5">
-                                                    <span className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400">
-                                                        <Clock size={12} />
-                                                        {row.duration}
-                                                    </span>
-                                                </td>
-                                                <td className="px-5 py-3.5 text-gray-400 dark:text-gray-500 text-xs">{row.time}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                {recentCalls.length === 0 ? (
+                                    <p className="px-5 py-8 text-sm text-gray-400 dark:text-gray-500 text-center italic">
+                                        No calls yet. Call the demo line to get started.
+                                    </p>
+                                ) : (
+                                    <table className="w-full text-sm min-w-[540px]">
+                                        <TableHead cols={["Caller", "Duration", "Status", "Time"]} />
+                                        <tbody className="divide-y divide-gray-50 dark:divide-white/5">
+                                            {recentCalls.map((call) => (
+                                                <tr key={call.id} onClick={() => setSelectedCall(call)} className="hover:bg-gray-50 dark:hover:bg-white/3 transition-colors cursor-pointer">
+                                                    <td className="px-5 py-3.5 font-medium text-gray-900 dark:text-white font-mono text-xs">
+                                                        {call.from}
+                                                    </td>
+                                                    <td className="px-5 py-3.5">
+                                                        <span className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400">
+                                                            <Clock size={12} />
+                                                            {formatDuration(call.duration)}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400 text-xs capitalize">
+                                                        {call.status}
+                                                    </td>
+                                                    <td className="px-5 py-3.5 text-gray-400 dark:text-gray-500 text-xs">
+                                                        {formatCallTime(call.startedAt)}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
                             </div>
                         </section>
 
                         {/* ── Leads Captured ───────────────────────────────────── */}
                         <section>
-                            <SectionHeader icon={User} title="Leads Captured" count={MOCK_LEADS.length} unit="leads" />
+                            <SectionHeader icon={User} title="Leads Captured" count={leadCount} unit="leads" />
                             <div className="bg-white dark:bg-[#0d1420] border border-gray-200 dark:border-white/10 rounded-2xl shadow-sm overflow-x-auto">
-                                <table className="w-full text-sm min-w-[540px]">
-                                    <TableHead cols={["Name", "Phone", "Interest", "Status"]} />
-                                    <tbody className="divide-y divide-gray-50 dark:divide-white/5">
-                                        {MOCK_LEADS.map((row, i) => (
-                                            <tr key={i} className="hover:bg-gray-50 dark:hover:bg-white/3 transition-colors">
-                                                <td className="px-5 py-3.5 font-medium text-gray-900 dark:text-white">{row.name}</td>
-                                                <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400 font-mono text-xs">{row.phone}</td>
-                                                <td className="px-5 py-3.5 text-gray-600 dark:text-gray-300">{row.interest}</td>
-                                                <td className="px-5 py-3.5">
-                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${LEAD_STATUS_STYLES[row.status]}`}>
-                                                        {row.status}
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                {recentLeads.length === 0 ? (
+                                    <p className="px-5 py-8 text-sm text-gray-400 dark:text-gray-500 text-center italic">
+                                        No leads captured yet.
+                                    </p>
+                                ) : (
+                                    <table className="w-full text-sm min-w-[540px]">
+                                        <TableHead cols={["Name", "Phone", "Interest", "Status"]} />
+                                        <tbody className="divide-y divide-gray-50 dark:divide-white/5">
+                                            {recentLeads.map((lead) => (
+                                                <tr key={lead.id} className="hover:bg-gray-50 dark:hover:bg-white/3 transition-colors">
+                                                    <td className="px-5 py-3.5 font-medium text-gray-900 dark:text-white">{lead.name}</td>
+                                                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400 font-mono text-xs">{lead.phone}</td>
+                                                    <td className="px-5 py-3.5 text-gray-600 dark:text-gray-300">{lead.interest}</td>
+                                                    <td className="px-5 py-3.5">
+                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${LEAD_STATUS_STYLES[lead.status] ?? ""}`}>
+                                                            {lead.status}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
                             </div>
                         </section>
 
-                        {/* ── Conversation Transcript ───────────────────────────── */}
+                        {/* ── Call Details ──────────────────────────────────────── */}
                         <section>
-                            <SectionHeader icon={MessageSquare} title="Conversation Transcript" subtitle="Sample · Rahul Sharma · Today, 2:15 PM" />
-                            <div className="bg-white dark:bg-[#0d1420] border border-gray-200 dark:border-white/10 rounded-2xl shadow-sm p-5 space-y-3">
-                                {MOCK_TRANSCRIPT.map((msg, i) => (
-                                    <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                                        <div className={`max-w-[78%] px-4 py-2.5 text-sm leading-relaxed rounded-2xl ${
-                                            msg.role === "ai"
-                                                ? "bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20 text-gray-800 dark:text-gray-200 rounded-tl-sm"
-                                                : "bg-gray-100 dark:bg-white/8 border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300 rounded-tr-sm"
-                                        }`}>
-                                            {msg.role === "ai" && (
-                                                <p className="text-[10px] font-bold text-blue-500 dark:text-blue-400 mb-1 uppercase tracking-wider">
-                                                    Auri · AI
-                                                </p>
-                                            )}
-                                            {msg.text}
+                            <SectionHeader icon={MessageSquare} title="Call Details" />
+                            <div className="bg-white dark:bg-[#0d1420] border border-gray-200 dark:border-white/10 rounded-2xl shadow-sm p-5">
+                                {!selectedCall ? (
+                                    <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-6 italic">
+                                        Select a call to view details
+                                    </p>
+                                ) : (
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="flex flex-col gap-1 p-4 rounded-xl bg-gray-50 dark:bg-white/4 border border-gray-100 dark:border-white/8">
+                                            <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Caller Number</p>
+                                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 font-mono">{selectedCall.from}</p>
+                                        </div>
+                                        <div className="flex flex-col gap-1 p-4 rounded-xl bg-gray-50 dark:bg-white/4 border border-gray-100 dark:border-white/8">
+                                            <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Status</p>
+                                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 capitalize">{selectedCall.status}</p>
+                                        </div>
+                                        <div className="flex flex-col gap-1 p-4 rounded-xl bg-gray-50 dark:bg-white/4 border border-gray-100 dark:border-white/8">
+                                            <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Duration</p>
+                                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{formatDuration(selectedCall.duration)}</p>
+                                        </div>
+                                        <div className="flex flex-col gap-1 p-4 rounded-xl bg-gray-50 dark:bg-white/4 border border-gray-100 dark:border-white/8">
+                                            <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Time</p>
+                                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{formatCallTime(selectedCall.startedAt)}</p>
                                         </div>
                                     </div>
-                                ))}
+                                )}
                             </div>
                         </section>
 

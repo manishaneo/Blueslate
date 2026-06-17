@@ -1,5 +1,7 @@
 import crypto from "crypto";
+import prisma from "../prismaClient.js";
 import { extractWebsiteMetadata }          from "../services/websiteAnalysis.service.js";
+import { createBusinessContext }           from "../services/businessContext.service.js";
 import { detectIntent, getSmallTalkResponse } from "../services/intent.service.js";
 import { extractLeadData }                 from "../services/leadExtraction.service.js";
 import { askGemini }                       from "../services/ai.service.js";
@@ -15,6 +17,105 @@ setInterval(() => {
         if (v.createdAt < cutoff) demoSessions.delete(k);
     }
 }, 5 * 60 * 1000);
+
+// ── GET /api/demo/info ────────────────────────────────────────────────────────
+export async function handleDemoInfo(req, res) {
+    const phoneNumber = process.env.TWILIO_PHONE_NUMBER ?? null;
+
+    // Most-recent BusinessContext that has actual content (mirrors VAPI fallback logic)
+    const context = await prisma.businessContext.findFirst({
+        where: {
+            websiteUrl: { contains: "xpleague.com" },
+            content:    { not: null },
+            AND:        { content: { not: "" } },
+        },
+        orderBy: { createdAt: "desc" },
+        select:  { id: true, title: true, description: true, businessId: true, lastScrapedAt: true },
+    }).catch(() => null);
+
+    let leadCount      = 0;
+    let recentLeads    = [];
+    let recentCalls    = [];
+    let activeCallCount = 0;
+
+    const ACTIVE_STATUSES = ["initiated", "ringing", "in-progress"];
+
+    if (context) {
+        [leadCount, recentLeads, recentCalls, activeCallCount] = await Promise.all([
+            prisma.lead.count({
+                where: { businessContextId: context.id },
+            }).catch(() => 0),
+
+            prisma.lead.findMany({
+                where:   { businessContextId: context.id },
+                orderBy: { createdAt: "desc" },
+                take:    5,
+                select:  { id: true, name: true, phone: true, interest: true, status: true, createdAt: true },
+            }).catch(() => []),
+
+            prisma.call.findMany({
+                orderBy: { startedAt: "desc" },
+                take:    5,
+                select:  { id: true, from: true, duration: true, status: true, startedAt: true },
+            }).catch(() => []),
+
+            prisma.call.count({
+                where: { status: { in: ACTIVE_STATUSES } },
+            }).catch(() => 0),
+        ]);
+    }
+
+    return res.json({
+        success: true,
+        data: {
+            phoneNumber,
+            businessName:   context?.title        ?? null,
+            description:    context?.description  ?? null,
+            lastScrapedAt:  context?.lastScrapedAt ?? null,
+            leadCount,
+            recentLeads,
+            recentCalls,
+            activeCallCount,
+            agentStatus: activeCallCount > 0 ? "busy" : "available",
+        },
+    });
+}
+
+// ── POST /api/demo/seed ───────────────────────────────────────────────────────
+const XP_LEAGUE_URL = "https://xpleague.com";
+
+export async function handleDemoSeed(req, res) {
+    const existing = await prisma.businessContext.findFirst({
+        where: {
+            websiteUrl: { contains: "xpleague.com" },
+            content:    { not: null },
+            AND:        { content: { not: "" } },
+        },
+        orderBy: { createdAt: "desc" },
+        select:  { id: true, title: true },
+    }).catch(() => null);
+
+    if (existing) {
+        return res.json({ success: true, data: { seeded: false, title: existing.title } });
+    }
+
+    try {
+        const metadata = await extractWebsiteMetadata(XP_LEAGUE_URL);
+        const context  = await createBusinessContext(
+            null,
+            XP_LEAGUE_URL,
+            metadata.title,
+            metadata.description,
+            metadata.content,
+            metadata.faqs ?? [],
+            new Date(),
+        );
+        return res.json({ success: true, data: { seeded: true, title: context.title } });
+    } catch (err) {
+        console.error("[DEMO SEED]", err.message);
+        return res.status(500).json({ success: false, message: "Scrape failed: " + err.message });
+    }
+}
 
 // ── POST /api/demo/scrape ─────────────────────────────────────────────────────
 export async function handleScrape(req, res) {
