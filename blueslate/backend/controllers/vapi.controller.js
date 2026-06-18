@@ -1,6 +1,8 @@
 import prisma from "../prismaClient.js";
 import { askGemini } from "../services/ai.service.js";
 import { generateGroqAnswer } from "../services/groq.service.js";
+import { extractLeadData }             from "../services/leadExtraction.service.js";
+import { createLead, findLeadByEmail } from "../services/lead.service.js";
 
 /**
  * POST /api/vapi/tool
@@ -85,6 +87,17 @@ async function _handleGetBusinessInfo(call, query) {
 
         if (!businessContext?.content) {
             return "I don't have business information loaded yet. Please call back shortly.";
+        }
+
+        const { name, email, phone, interest } = extractLeadData(query);
+        if (email || phone) {
+            const existing = email
+                ? await findLeadByEmail(email, [businessContext.id])
+                : null;
+            if (!existing) {
+                await createLead({ businessContextId: businessContext.id, name, email, phone, interest, source: "vapi" })
+                    .catch((err) => console.error("[VAPI] createLead failed:", err.message));
+            }
         }
 
         console.log("[VAPI] Calling askGemini...");
