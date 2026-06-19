@@ -148,10 +148,14 @@ async function _resolveBusinessContext(call) {
         console.log("[VAPI] WARNING: VAPI_TEST_BUSINESS_ID matched no row, falling through to most-recent");
     }
 
-    // 3. Fallback: most recent BusinessContext row that actually has content
-    console.log("[VAPI] resolving via fallback (most recent non-empty BusinessContext)");
+    // 3. Fallback: pin to XP League context (mirrors /api/demo/info logic)
+    console.log("[VAPI] resolving via fallback (XP League BusinessContext)");
     const fallback = await prisma.businessContext.findFirst({
-        where:   { content: { not: null }, AND: { content: { not: "" } } },
+        where: {
+            websiteUrl: { contains: "xpleague.com" },
+            content:    { not: null },
+            AND:        { content: { not: "" } },
+        },
         orderBy: { createdAt: "desc" },
     });
     console.log(`[VAPI] Selected row — id: ${fallback?.id}, businessId: ${fallback?.businessId}, createdAt: ${fallback?.createdAt}`);
