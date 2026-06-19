@@ -56,7 +56,7 @@ export async function handleDemoInfo(req, res) {
             prisma.call.findMany({
                 orderBy: { startedAt: "desc" },
                 take:    5,
-                select:  { id: true, from: true, duration: true, status: true, startedAt: true },
+                select:  { id: true, from: true, duration: true, status: true, startedAt: true, transcript: true },
             }).catch(() => []),
 
             prisma.call.count({

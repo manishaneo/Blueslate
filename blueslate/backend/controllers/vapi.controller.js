@@ -117,6 +117,68 @@ async function _handleGetBusinessInfo(call, query) {
     }
 }
 
+// ── POST /api/vapi/webhook ────────────────────────────────────────────────────
+// Receives VAPI call lifecycle events. Configure this URL as "Server URL" in
+// the VAPI assistant settings. Only end-of-call-report is acted on; all other
+// event types return 200 immediately so VAPI doesn't retry them.
+export async function handleVapiWebhook(req, res) {
+    const type = req.body?.message?.type;
+    console.log("[VAPI WEBHOOK] type:", type);
+
+    if (type !== "end-of-call-report") {
+        return res.sendStatus(200);
+    }
+
+    const { message } = req.body;
+    const call        = message.call     ?? {};
+    const artifact    = message.artifact ?? {};
+
+    const vapiCallId  = call.id          ?? null;
+    const callerPhone = call.customer?.number ?? "unknown";
+    const calledPhone = call.phoneNumber?.number ?? process.env.TWILIO_PHONE_NUMBER ?? "unknown";
+    const startedAt   = call.startedAt   ? new Date(call.startedAt) : new Date();
+    const endedAt     = call.endedAt     ? new Date(call.endedAt)   : new Date();
+    const durationSec = call.startedAt && call.endedAt
+        ? Math.round((new Date(call.endedAt) - new Date(call.startedAt)) / 1000)
+        : null;
+    const transcript  = artifact.transcript ?? null;
+    const status      = message.endedReason ?? "completed";
+
+    if (!vapiCallId) {
+        console.warn("[VAPI WEBHOOK] end-of-call-report missing call.id — skipping DB write");
+        return res.sendStatus(200);
+    }
+
+    try {
+        await prisma.call.upsert({
+            where: { callSid: vapiCallId },
+            create: {
+                callSid:      vapiCallId,
+                from:         callerPhone,
+                to:           calledPhone,
+                status,
+                direction:    "inbound",
+                startedAt,
+                endedAt,
+                duration:     durationSec,
+                transcript:   transcript ? { text: transcript } : undefined,
+            },
+            update: {
+                status,
+                endedAt,
+                duration:   durationSec,
+                transcript: transcript ? { text: transcript } : undefined,
+            },
+        });
+        console.log("[VAPI WEBHOOK] saved call:", vapiCallId, "| from:", callerPhone, "| duration:", durationSec, "s");
+    } catch (err) {
+        console.error("[VAPI WEBHOOK] DB write failed:", err.message);
+        // Still return 200 — VAPI retries on non-2xx, and a DB error is not recoverable by retry.
+    }
+
+    return res.sendStatus(200);
+}
+
 async function _resolveBusinessContext(call) {
     // 1. Prefer businessId from call metadata (set by Twilio webhook when routing to VAPI)
     const metaBusinessId = call?.metadata?.businessId;
