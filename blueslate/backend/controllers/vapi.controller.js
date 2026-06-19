@@ -122,6 +122,9 @@ async function _handleGetBusinessInfo(call, query) {
 // the VAPI assistant settings. Only end-of-call-report is acted on; all other
 // event types return 200 immediately so VAPI doesn't retry them.
 export async function handleVapiWebhook(req, res) {
+    // TEMPORARY — remove after confirming correct field paths in Render logs
+    console.log("[VAPI WEBHOOK FULL]", JSON.stringify(req.body, null, 2));
+
     const type = req.body?.message?.type;
     console.log("[VAPI WEBHOOK] type:", type);
 
@@ -129,29 +132,71 @@ export async function handleVapiWebhook(req, res) {
         return res.sendStatus(200);
     }
 
-    const { message } = req.body;
-    const call        = message.call     ?? {};
-    const artifact    = message.artifact ?? {};
+    const msg      = req.body.message;
+    const call     = msg.call     ?? {};
+    const artifact = msg.artifact ?? {};
 
-    const vapiCallId  = call.id          ?? null;
-    const callerPhone = call.customer?.number ?? "unknown";
-    const calledPhone = call.phoneNumber?.number ?? process.env.TWILIO_PHONE_NUMBER ?? "unknown";
-    const startedAt   = call.startedAt   ? new Date(call.startedAt) : new Date();
-    const endedAt     = call.endedAt     ? new Date(call.endedAt)   : new Date();
-    const durationSec = call.startedAt && call.endedAt
-        ? Math.round((new Date(call.endedAt) - new Date(call.startedAt)) / 1000)
-        : null;
-    const transcript  = artifact.transcript ?? null;
-    const status      = message.endedReason ?? "completed";
-
+    // ── Call ID ───────────────────────────────────────────────────────────────
+    const vapiCallId = call.id ?? null;
     if (!vapiCallId) {
         console.warn("[VAPI WEBHOOK] end-of-call-report missing call.id — skipping DB write");
         return res.sendStatus(200);
     }
 
+    // ── Caller phone ──────────────────────────────────────────────────────────
+    // Newer VAPI versions hoist customer to message.customer;
+    // older versions nest it under message.call.customer.
+    const callerPhone =
+        msg.customer?.number ??
+        call.customer?.number ??
+        "unknown";
+
+    // ── Destination phone (our number) ────────────────────────────────────────
+    const calledPhone =
+        msg.phoneNumber?.number ??
+        call.phoneNumber?.number ??
+        process.env.TWILIO_PHONE_NUMBER ??
+        "unknown";
+
+    // ── Timestamps ────────────────────────────────────────────────────────────
+    const startedAt = call.startedAt ? new Date(call.startedAt) : new Date();
+    const endedAt   = call.endedAt   ? new Date(call.endedAt)   : new Date();
+
+    // ── Duration ──────────────────────────────────────────────────────────────
+    // VAPI may provide durationSeconds directly at message level,
+    // or it can be calculated from the call timestamps.
+    const durationSec =
+        (typeof msg.durationSeconds === "number" ? msg.durationSeconds : null) ??
+        (call.startedAt && call.endedAt
+            ? Math.round((new Date(call.endedAt) - new Date(call.startedAt)) / 1000)
+            : null);
+
+    // ── Transcript ────────────────────────────────────────────────────────────
+    // Newer VAPI: message.transcript (plain text) + message.messages (structured)
+    // Older VAPI: message.artifact.transcript + message.artifact.messages
+    const transcriptText = msg.transcript ?? artifact.transcript ?? null;
+    const messages       = msg.messages   ?? artifact.messages   ?? [];
+    const recordingUrl   = msg.recordingUrl ?? artifact.recordingUrl ?? null;
+
+    // ── Status ────────────────────────────────────────────────────────────────
+    const status = msg.endedReason ?? "completed";
+
+    // ── Structured transcript payload stored in the Json column ───────────────
+    const transcriptPayload = (transcriptText || messages.length)
+        ? { text: transcriptText, messages }
+        : undefined;
+
+    console.log("[VAPI WEBHOOK] parsed —",
+        "callId:", vapiCallId,
+        "| from:", callerPhone,
+        "| duration:", durationSec, "s",
+        "| transcriptChars:", transcriptText?.length ?? 0,
+        "| turns:", messages.length,
+    );
+
     try {
         await prisma.call.upsert({
-            where: { callSid: vapiCallId },
+            where:  { callSid: vapiCallId },
             create: {
                 callSid:      vapiCallId,
                 from:         callerPhone,
@@ -161,19 +206,22 @@ export async function handleVapiWebhook(req, res) {
                 startedAt,
                 endedAt,
                 duration:     durationSec,
-                transcript:   transcript ? { text: transcript } : undefined,
+                recordingUrl: recordingUrl ?? undefined,
+                transcript:   transcriptPayload,
             },
             update: {
+                from:         callerPhone,
                 status,
                 endedAt,
-                duration:   durationSec,
-                transcript: transcript ? { text: transcript } : undefined,
+                duration:     durationSec,
+                recordingUrl: recordingUrl ?? undefined,
+                transcript:   transcriptPayload,
             },
         });
         console.log("[VAPI WEBHOOK] saved call:", vapiCallId, "| from:", callerPhone, "| duration:", durationSec, "s");
     } catch (err) {
         console.error("[VAPI WEBHOOK] DB write failed:", err.message);
-        // Still return 200 — VAPI retries on non-2xx, and a DB error is not recoverable by retry.
+        // Still return 200 — VAPI retries on non-2xx, a DB error is not recoverable by retry.
     }
 
     return res.sendStatus(200);

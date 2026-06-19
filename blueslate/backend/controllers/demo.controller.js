@@ -33,15 +33,39 @@ export async function handleDemoInfo(req, res) {
         select:  { id: true, title: true, description: true, businessId: true, lastScrapedAt: true },
     }).catch(() => null);
 
-    let leadCount      = 0;
-    let recentLeads    = [];
-    let recentCalls    = [];
-    let activeCallCount = 0;
-
     const ACTIVE_STATUSES = ["initiated", "ringing", "in-progress"];
 
+    // Calls are independent of BusinessContext — always fetch them.
+    const [rawCalls, activeCallCount] = await Promise.all([
+        prisma.call.findMany({
+            orderBy: { startedAt: "desc" },
+            take:    10,
+            select:  { id: true, from: true, duration: true, status: true, startedAt: true, endedAt: true, transcript: true },
+        }).catch(() => []),
+
+        prisma.call.count({
+            where: { status: { in: ACTIVE_STATUSES } },
+        }).catch(() => 0),
+    ]);
+
+    // Normalize the transcript Json column into a predictable shape.
+    // Stored as { text: string, messages: [] } — expose both for the frontend.
+    const recentCalls = rawCalls.map((c) => ({
+        id:         c.id,
+        from:       c.from,
+        duration:   c.duration,
+        status:     c.status,
+        startedAt:  c.startedAt,
+        endedAt:    c.endedAt,
+        transcript: c.transcript?.text     ?? null,
+        messages:   c.transcript?.messages ?? [],
+    }));
+
+    let leadCount   = 0;
+    let recentLeads = [];
+
     if (context) {
-        [leadCount, recentLeads, recentCalls, activeCallCount] = await Promise.all([
+        [leadCount, recentLeads] = await Promise.all([
             prisma.lead.count({
                 where: { businessContextId: context.id },
             }).catch(() => 0),
@@ -52,16 +76,6 @@ export async function handleDemoInfo(req, res) {
                 take:    5,
                 select:  { id: true, name: true, phone: true, interest: true, status: true, createdAt: true },
             }).catch(() => []),
-
-            prisma.call.findMany({
-                orderBy: { startedAt: "desc" },
-                take:    5,
-                select:  { id: true, from: true, duration: true, status: true, startedAt: true, transcript: true },
-            }).catch(() => []),
-
-            prisma.call.count({
-                where: { status: { in: ACTIVE_STATUSES } },
-            }).catch(() => 0),
         ]);
     }
 
