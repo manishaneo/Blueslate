@@ -9,11 +9,12 @@ import { createLead, findLeadByEmail } from "../services/lead.service.js";
  *
  * Handles both VAPI tool payload formats:
  *
- *   API Request Tool (current):
- *     Body: { query: "..." }
+ *   API Request Tool:
+ *     getBusinessInfo  → body: { query: "..." }
+ *     captureLead      → body: { name, email, phone, interest }
  *     Response: { result: "..." }
  *
- *   Function/Webhook Tool (future Twilio integration):
+ *   Function/Webhook Tool (Server URL mode):
  *     Body: { message: { type: "tool-calls", toolCallList: [...] } }
  *     Response: { results: [{ toolCallId, result }] }
  */
@@ -28,15 +29,24 @@ export async function handleVapiToolCall(req, res) {
         return _handleWebhookFormat(req, res);
     }
 
-    // VAPI API Request Tool — parameters arrive at root level: { query: "..." }
+    // VAPI API Request Tool — parameters arrive at root level
     return _handleApiRequestFormat(req, res);
 }
 
 async function _handleApiRequestFormat(req, res) {
     console.log("[VAPI] Format: API Request Tool");
-    const query = req.body?.query;
-    const result = await _handleGetBusinessInfo(null, query);
-    console.log("[VAPI] Responding with result:", result);
+
+    // Discriminate by which parameters are present.
+    // captureLead sends { name?, email?, phone?, interest? } — no "query" key.
+    if (req.body?.query !== undefined) {
+        const result = await _handleGetBusinessInfo(null, req.body.query);
+        console.log("[VAPI] getBusinessInfo result:", result);
+        return res.json({ result });
+    }
+
+    // captureLead — at least one contact field expected
+    const result = await _handleCaptureLead(null, req.body ?? {});
+    console.log("[VAPI] captureLead result:", result);
     return res.json({ result });
 }
 
@@ -63,12 +73,59 @@ async function _handleWebhookFormat(req, res) {
         if (fnName === "getBusinessInfo") {
             const result = await _handleGetBusinessInfo(message.call, args.query);
             results.push({ toolCallId, result });
+        } else if (fnName === "captureLead") {
+            const result = await _handleCaptureLead(message.call, args);
+            results.push({ toolCallId, result });
         } else {
             results.push({ toolCallId, result: "Unknown tool." });
         }
     }
 
     return res.json({ results });
+}
+
+// ── captureLead ───────────────────────────────────────────────────────────────
+// Called by the VAPI assistant when it has collected lead contact details.
+// Saves a lead row and returns a confirmation string spoken back to the caller.
+async function _handleCaptureLead(call, args) {
+    const { name, email, phone, interest } = args ?? {};
+
+    console.log("[VAPI] captureLead args:", { name, email, phone, interest });
+
+    if (!email && !phone) {
+        return "I wasn't able to save your details — could you please share your email address or phone number?";
+    }
+
+    try {
+        const businessContext = await _resolveBusinessContext(call);
+        if (!businessContext) {
+            console.warn("[VAPI] captureLead: no business context — saving skipped");
+            return "I've noted your interest and someone from our team will follow up with you soon.";
+        }
+
+        const existing = email ? await findLeadByEmail(email, [businessContext.id]) : null;
+
+        if (existing) {
+            console.log("[VAPI] captureLead: duplicate lead, updating interest —", email);
+            // Still confirm warmly; don't reveal duplicate logic to the caller.
+        } else {
+            await createLead({
+                businessContextId: businessContext.id,
+                name:     name     ?? null,
+                email:    email    ?? null,
+                phone:    phone    ?? null,
+                interest: interest?.slice(0, 500) ?? null,
+                source:   "vapi",
+            });
+            console.log("[VAPI] captureLead: lead saved —", { name, email, phone });
+        }
+
+        return "I've noted your interest and someone from our team will be in touch with you soon!";
+    } catch (err) {
+        console.error("[VAPI] captureLead error:", err.message);
+        // Always return a warm confirmation — DB errors must not confuse the caller.
+        return "I've noted your interest and our team will follow up with you soon.";
+    }
 }
 
 async function _handleGetBusinessInfo(call, query) {
@@ -230,6 +287,37 @@ export async function handleVapiWebhook(req, res) {
     } catch (err) {
         console.error("[VAPI WEBHOOK] DB write failed:", err.message);
         // Still return 200 — VAPI retries on non-2xx, a DB error is not recoverable by retry.
+    }
+
+    // ── Fallback lead extraction from transcript ───────────────────────────────
+    // If the captureLead tool was called during the conversation the lead is already
+    // saved. This pass runs regardless — extractLeadData + findLeadByEmail guard
+    // against duplicates, so it is safe to run both paths.
+    if (transcriptText) {
+        try {
+            const { name, email, phone } = extractLeadData(transcriptText);
+            if (email || phone) {
+                const businessContext = await _resolveBusinessContext(call);
+                if (businessContext) {
+                    const existing = email ? await findLeadByEmail(email, [businessContext.id]) : null;
+                    if (!existing) {
+                        await createLead({
+                            businessContextId: businessContext.id,
+                            name:     name  ?? null,
+                            email:    email ?? null,
+                            phone:    phone ?? null,
+                            interest: `Captured from ${callType} call transcript`,
+                            source:   "vapi",
+                        });
+                        console.log("[VAPI WEBHOOK] transcript lead saved:", { name, email, phone });
+                    } else {
+                        console.log("[VAPI WEBHOOK] transcript lead already exists — skipping:", email);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error("[VAPI WEBHOOK] transcript lead extraction failed:", err.message);
+        }
     }
 
     return res.sendStatus(200);
