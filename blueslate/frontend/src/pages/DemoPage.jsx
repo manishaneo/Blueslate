@@ -1,11 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { API_BASE_URL } from "../utils/api";
 import {
     ArrowLeft, LayoutDashboard, Moon, Sun, Phone, ExternalLink,
     BarChart2, CheckCircle2, Clock, User, PhoneCall, MessageSquare, Loader2,
+    RefreshCw, Globe,
 } from "lucide-react";
 import { useTheme } from "../hooks/useTheme";
 import AgentStatusBadge from "../components/AgentStatusBadge";
+
+const POLL_INTERVAL_MS = 30_000; // refresh call list every 30 s
 
 const LEAD_STATUS_STYLES = {
     Hot:  "bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 border-red-200 dark:border-red-500/20",
@@ -48,7 +51,16 @@ export default function DemoPage() {
     const [demoData, setDemoData] = useState(null);
     const [loading,  setLoading]  = useState(true);
     const [seeding,  setSeeding]  = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
     const [selectedCall, setSelectedCall] = useState(null);
+
+    // Fetch and update live data without resetting the full loading state.
+    const refreshData = useCallback(async (showSpinner = false) => {
+        if (showSpinner) setRefreshing(true);
+        const info = await fetchDemoInfo();
+        if (info) setDemoData(info);
+        if (showSpinner) setRefreshing(false);
+    }, []);
 
     useEffect(() => {
         async function load() {
@@ -72,6 +84,13 @@ export default function DemoPage() {
         }
         load();
     }, []);
+
+    // Poll every 30 s while the dashboard tab is visible so new calls appear automatically.
+    useEffect(() => {
+        if (view !== "dashboard") return;
+        const id = setInterval(() => refreshData(false), POLL_INTERVAL_MS);
+        return () => clearInterval(id);
+    }, [view, refreshData]);
 
     const businessName = demoData?.businessName ?? "XP League Frisco";
     const phoneNumber  = demoData?.phoneNumber  ?? null;
@@ -237,7 +256,18 @@ export default function DemoPage() {
 
                         {/* ── Call History ─────────────────────────────────────── */}
                         <section>
-                            <SectionHeader icon={PhoneCall} title="Call History" count={recentCalls.length} unit="calls" />
+                            <div className="flex items-center justify-between mb-4">
+                                <SectionHeader icon={PhoneCall} title="Call History" count={recentCalls.length} unit="calls" />
+                                <button
+                                    onClick={() => refreshData(true)}
+                                    disabled={refreshing}
+                                    className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors disabled:opacity-40"
+                                    title="Refresh calls"
+                                >
+                                    <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+                                    {refreshing ? "Refreshing…" : "Refresh"}
+                                </button>
+                            </div>
                             <div className="bg-white dark:bg-[#0d1420] border border-gray-200 dark:border-white/10 rounded-2xl shadow-sm overflow-x-auto">
                                 {recentCalls.length === 0 ? (
                                     <p className="px-5 py-8 text-sm text-gray-400 dark:text-gray-500 text-center italic">
@@ -250,7 +280,12 @@ export default function DemoPage() {
                                             {recentCalls.map((call) => (
                                                 <tr key={call.id} onClick={() => setSelectedCall(call)} className="hover:bg-gray-50 dark:hover:bg-white/3 transition-colors cursor-pointer">
                                                     <td className="px-5 py-3.5 font-medium text-gray-900 dark:text-white font-mono text-xs">
-                                                        {call.from}
+                                                        {call.callType === "webCall" || call.from === "unknown" ? (
+                                                            <span className="inline-flex items-center gap-1 text-blue-500 dark:text-blue-400 not-italic font-semibold">
+                                                                <Globe size={11} />
+                                                                Web Call
+                                                            </span>
+                                                        ) : call.from}
                                                     </td>
                                                     <td className="px-5 py-3.5">
                                                         <span className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400">
@@ -313,8 +348,20 @@ export default function DemoPage() {
                                 ) : (
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="flex flex-col gap-1 p-4 rounded-xl bg-gray-50 dark:bg-white/4 border border-gray-100 dark:border-white/8">
-                                            <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Caller Number</p>
-                                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 font-mono">{selectedCall.from}</p>
+                                            <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Caller</p>
+                                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 font-mono">
+                                                {selectedCall.callType === "webCall" || selectedCall.from === "unknown"
+                                                    ? "Web Call"
+                                                    : selectedCall.from}
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-col gap-1 p-4 rounded-xl bg-gray-50 dark:bg-white/4 border border-gray-100 dark:border-white/8">
+                                            <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Call Type</p>
+                                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 capitalize">
+                                                {selectedCall.callType === "webCall" ? "Web Call"
+                                                    : selectedCall.callType === "inboundPhoneCall" ? "Phone Call"
+                                                    : selectedCall.callType ?? "—"}
+                                            </p>
                                         </div>
                                         <div className="flex flex-col gap-1 p-4 rounded-xl bg-gray-50 dark:bg-white/4 border border-gray-100 dark:border-white/8">
                                             <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Status</p>
@@ -324,7 +371,7 @@ export default function DemoPage() {
                                             <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Duration</p>
                                             <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{formatDuration(selectedCall.duration)}</p>
                                         </div>
-                                        <div className="flex flex-col gap-1 p-4 rounded-xl bg-gray-50 dark:bg-white/4 border border-gray-100 dark:border-white/8">
+                                        <div className="flex flex-col gap-1 p-4 rounded-xl bg-gray-50 dark:bg-white/4 border border-gray-100 dark:border-white/8 col-span-2">
                                             <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Time</p>
                                             <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{formatCallTime(selectedCall.startedAt)}</p>
                                         </div>

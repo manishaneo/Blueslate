@@ -49,7 +49,7 @@ export async function handleDemoInfo(req, res) {
     ]);
 
     // Normalize the transcript Json column into a predictable shape.
-    // Stored as { text: string, messages: [] } — expose both for the frontend.
+    // Stored as { callType, text, messages } — expose all three for the frontend.
     const recentCalls = rawCalls.map((c) => ({
         id:         c.id,
         from:       c.from,
@@ -57,6 +57,7 @@ export async function handleDemoInfo(req, res) {
         status:     c.status,
         startedAt:  c.startedAt,
         endedAt:    c.endedAt,
+        callType:   c.transcript?.callType ?? "unknown",
         transcript: c.transcript?.text     ?? null,
         messages:   c.transcript?.messages ?? [],
     }));

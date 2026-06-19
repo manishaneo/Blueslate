@@ -171,6 +171,10 @@ export async function handleVapiWebhook(req, res) {
             ? Math.round((new Date(call.endedAt) - new Date(call.startedAt)) / 1000)
             : null);
 
+    // ── Call type ─────────────────────────────────────────────────────────────
+    // "webCall" (VAPI dashboard / Talk button) or "inboundPhoneCall" (real call)
+    const callType = call.type ?? "unknown";
+
     // ── Transcript ────────────────────────────────────────────────────────────
     // Newer VAPI: message.transcript (plain text) + message.messages (structured)
     // Older VAPI: message.artifact.transcript + message.artifact.messages
@@ -182,12 +186,16 @@ export async function handleVapiWebhook(req, res) {
     const status = msg.endedReason ?? "completed";
 
     // ── Structured transcript payload stored in the Json column ───────────────
-    const transcriptPayload = (transcriptText || messages.length)
-        ? { text: transcriptText, messages }
-        : undefined;
+    // Always store callType so the dashboard can distinguish web vs phone calls.
+    const transcriptPayload = {
+        callType,
+        text:     transcriptText,
+        messages,
+    };
 
     console.log("[VAPI WEBHOOK] parsed —",
         "callId:", vapiCallId,
+        "| callType:", callType,
         "| from:", callerPhone,
         "| duration:", durationSec, "s",
         "| transcriptChars:", transcriptText?.length ?? 0,
