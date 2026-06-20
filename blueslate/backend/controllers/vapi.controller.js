@@ -2,7 +2,7 @@ import prisma from "../prismaClient.js";
 import { askGemini } from "../services/ai.service.js";
 import { generateGroqAnswer } from "../services/groq.service.js";
 import { extractLeadData }             from "../services/leadExtraction.service.js";
-import { createLead, findLeadByEmail } from "../services/lead.service.js";
+import { createLead, findLeadByEmail, findLeadByPhone } from "../services/lead.service.js";
 
 /**
  * POST /api/vapi/tool
@@ -103,10 +103,14 @@ async function _handleCaptureLead(call, args) {
             return "I've noted your interest and someone from our team will follow up with you soon.";
         }
 
-        const existing = email ? await findLeadByEmail(email, [businessContext.id]) : null;
+        // Dedup: check email first, then phone. Prevents duplicates for callers
+        // who share only a phone number (email check alone would miss them).
+        const existingByEmail = email ? await findLeadByEmail(email, [businessContext.id]) : null;
+        const existingByPhone = (!existingByEmail && phone) ? await findLeadByPhone(phone, [businessContext.id]) : null;
+        const existing = existingByEmail ?? existingByPhone;
 
         if (existing) {
-            console.log("[VAPI] captureLead: duplicate lead, updating interest —", email);
+            console.log("[VAPI] captureLead: duplicate lead —", email ?? phone);
             // Still confirm warmly; don't reveal duplicate logic to the caller.
         } else {
             await createLead({
@@ -129,6 +133,7 @@ async function _handleCaptureLead(call, args) {
 }
 
 async function _handleGetBusinessInfo(call, query) {
+    console.log("[DEBUG] getBusinessInfo call =", JSON.stringify(call, null, 2));
     console.log("[VAPI] Query:", query);
 
     if (!query?.trim()) {
@@ -137,21 +142,30 @@ async function _handleGetBusinessInfo(call, query) {
 
     try {
         const businessContext = await _resolveBusinessContext(call);
+        console.log("[DEBUG] businessContext.id =", businessContext?.id);
+        console.log("[DEBUG] businessContext.businessId =", businessContext?.businessId);
+        console.log("[DEBUG] businessContext.title =", businessContext?.title);
+        console.log("[DEBUG] content preview =", businessContext?.content?.slice(0, 300));
 
         console.log("[VAPI] Business found:", !!businessContext);
         console.log("[VAPI] Business title:", businessContext?.title);
         console.log("[VAPI] Content length:", businessContext?.content?.length);
+        console.log("[VAPI] businessContext.id        :", businessContext?.id);
+        console.log("[VAPI] businessContext.businessId :", businessContext?.businessId);
+        console.log("[VAPI] content[0:300]             :", businessContext?.content?.slice(0, 300));
 
-        if (!businessContext?.content) {
+        if (!businessContext) {
+            return "I don't have information about this business.";
+        }
+        if (!businessContext.content) {
             return "I don't have business information loaded yet. Please call back shortly.";
         }
 
         const { name, email, phone, interest } = extractLeadData(query);
         if (email || phone) {
-            const existing = email
-                ? await findLeadByEmail(email, [businessContext.id])
-                : null;
-            if (!existing) {
+            const existingByEmail = email ? await findLeadByEmail(email, [businessContext.id]) : null;
+            const existingByPhone = (!existingByEmail && phone) ? await findLeadByPhone(phone, [businessContext.id]) : null;
+            if (!existingByEmail && !existingByPhone) {
                 await createLead({ businessContextId: businessContext.id, name, email, phone, interest, source: "vapi" })
                     .catch((err) => console.error("[VAPI] createLead failed:", err.message));
             }
@@ -170,7 +184,7 @@ async function _handleGetBusinessInfo(call, query) {
         return answer;
     } catch (err) {
         console.error("[VAPI FULL ERROR]", err);
-        return `DEBUG ERROR: ${err.message}`;
+        return "I'm sorry, I'm having trouble answering right now. Please try again shortly.";
     }
 }
 
@@ -229,8 +243,13 @@ export async function handleVapiWebhook(req, res) {
             : null);
 
     // ── Call type ─────────────────────────────────────────────────────────────
-    // "webCall" (VAPI dashboard / Talk button) or "inboundPhoneCall" (real call)
+    // VAPI call.type values: "webCall" | "inboundPhoneCall" | "outboundPhoneCall"
     const callType = call.type ?? "unknown";
+
+    // ── Direction ─────────────────────────────────────────────────────────────
+    // outboundPhoneCall = we dialled the customer (portal Call Me flow).
+    // Everything else (inboundPhoneCall, webCall) is treated as inbound.
+    const direction = callType === "outboundPhoneCall" ? "outbound" : "inbound";
 
     // ── Transcript ────────────────────────────────────────────────────────────
     // Newer VAPI: message.transcript (plain text) + message.messages (structured)
@@ -267,7 +286,7 @@ export async function handleVapiWebhook(req, res) {
                 from:         callerPhone,
                 to:           calledPhone,
                 status,
-                direction:    "inbound",
+                direction,
                 startedAt,
                 endedAt,
                 duration:     durationSec,
@@ -289,29 +308,44 @@ export async function handleVapiWebhook(req, res) {
         // Still return 200 — VAPI retries on non-2xx, a DB error is not recoverable by retry.
     }
 
+    // ── Resolve business context once, reuse for both lead + conversation writes ──
+    // _resolveBusinessContext is async+DB; calling it once avoids a duplicate round-trip.
+    let webhookBusinessContext = null;
+    try {
+        webhookBusinessContext = await _resolveBusinessContext(call);
+    } catch (err) {
+        console.error("[VAPI WEBHOOK] _resolveBusinessContext failed:", err.message);
+    }
+
     // ── Fallback lead extraction from transcript ───────────────────────────────
     // If the captureLead tool was called during the conversation the lead is already
-    // saved. This pass runs regardless — extractLeadData + findLeadByEmail guard
-    // against duplicates, so it is safe to run both paths.
+    // saved. This pass runs regardless — dedup by email OR phone guards against
+    // duplicates, so it is safe to run both paths.
+    let capturedLeadId = null;
     if (transcriptText) {
         try {
             const { name, email, phone } = extractLeadData(transcriptText);
             if (email || phone) {
-                const businessContext = await _resolveBusinessContext(call);
-                if (businessContext) {
-                    const existing = email ? await findLeadByEmail(email, [businessContext.id]) : null;
+                if (webhookBusinessContext) {
+                    // Check email first, then fall back to phone for phone-only callers.
+                    const existingByEmail = email ? await findLeadByEmail(email, [webhookBusinessContext.id]) : null;
+                    const existingByPhone = (!existingByEmail && phone) ? await findLeadByPhone(phone, [webhookBusinessContext.id]) : null;
+                    const existing = existingByEmail ?? existingByPhone;
+
                     if (!existing) {
-                        await createLead({
-                            businessContextId: businessContext.id,
+                        const lead = await createLead({
+                            businessContextId: webhookBusinessContext.id,
                             name:     name  ?? null,
                             email:    email ?? null,
                             phone:    phone ?? null,
                             interest: `Captured from ${callType} call transcript`,
                             source:   "vapi",
                         });
+                        capturedLeadId = lead?.id ?? null;
                         console.log("[VAPI WEBHOOK] transcript lead saved:", { name, email, phone });
                     } else {
-                        console.log("[VAPI WEBHOOK] transcript lead already exists — skipping:", email);
+                        capturedLeadId = existing.id ?? null;
+                        console.log("[VAPI WEBHOOK] transcript lead already exists — skipping:", email ?? phone);
                     }
                 }
             }
@@ -320,11 +354,85 @@ export async function handleVapiWebhook(req, res) {
         }
     }
 
+    // ── Write a conversations row so the call appears in the dashboard ─────────
+    // CallHistoryPage reads from the conversations table (scoped by businessId).
+    // The calls table has no businessId FK so it cannot be dashboard-scoped.
+    // Guard with idempotency check so VAPI webhook retries don't create duplicates.
+    try {
+        const businessContext = webhookBusinessContext;
+        if (businessContext?.businessId) {
+            // Idempotency: skip if a conversations row already exists for this VAPI call.
+            const existing = await prisma.conversation.findFirst({
+                where: {
+                    metadata: {
+                        path:   ["vapiCallId"],
+                        equals: vapiCallId,
+                    },
+                },
+                select: { id: true },
+            });
+
+            if (existing) {
+                console.log("[VAPI WEBHOOK] conversations row already exists for call:", vapiCallId, "— skipping");
+            } else {
+                // Only record calls that produced actual conversation turns.
+                // Failed/unanswered calls (busy, rejected, international restriction) arrive
+                // with messages=[] and must not create ghost rows in the dashboard.
+                const conversationTurns = (messages ?? []).filter((m) => m.role === "user" || m.role === "bot");
+                if (conversationTurns.length === 0) {
+                    console.log("[VAPI WEBHOOK] no conversation turns — skipping conversations row for call:", vapiCallId, "| endedReason:", status);
+                } else {
+                // Convert VAPI messages to the conversations transcript format.
+                // VAPI roles: "user" | "bot" | "tool_call" | "tool_call_result" | "system"
+                // conversations transcript format: [{ role: "user"|"assistant", content, ts }]
+                // ts must be Unix seconds (integer) — portal.service.js stores the same format
+                // and CallHistoryPage.formatTs does `new Date(ts * 1000)`.
+                // m.time is seconds relative to call start; startedAt.getTime() is milliseconds.
+                const startedAtSec = Math.floor(startedAt.getTime() / 1000);
+                const transcript = conversationTurns.map((m) => ({
+                        role:    m.role === "bot" ? "assistant" : "user",
+                        content: m.message ?? m.content ?? "",
+                        ts:      typeof m.time === "number"
+                            ? startedAtSec + Math.floor(m.time)
+                            : startedAtSec,
+                    }));
+
+                await prisma.conversation.create({
+                    data: {
+                        businessId:        businessContext.businessId,
+                        businessContextId: businessContext.id,
+                        source:            "customer_portal_voice",
+                        transcript,
+                        leadId:            capturedLeadId ?? null,
+                        metadata: {
+                            vapiCallId,
+                            callType,
+                            startedAt:       startedAt.toISOString(),
+                            durationSeconds: durationSec,
+                            outcome:         capturedLeadId ? "LEAD_CAPTURED" : "INFORMATION_ONLY",
+                            lastIntent:      null,
+                        },
+                    },
+                });
+                console.log("[VAPI WEBHOOK] conversations row created for call:", vapiCallId);
+                } // end conversationTurns.length > 0
+            }
+        } else {
+            console.warn("[VAPI WEBHOOK] could not resolve businessId — conversations row skipped");
+        }
+    } catch (err) {
+        console.error("[VAPI WEBHOOK] conversations row creation failed:", err.message);
+        // Non-fatal — the call record is already saved; don't block the 200 response.
+    }
+
     return res.sendStatus(200);
 }
 
 async function _resolveBusinessContext(call) {
-    // 1. Prefer businessId from call metadata (set by Twilio webhook when routing to VAPI)
+    // 1. Prefer businessId from call metadata (set when creating the outbound call via
+    //    initiateVapiOutboundCall). This is the authoritative source for portal calls.
+    //    Requires the VAPI assistant tool to be configured as a Server URL / Function tool
+    //    (not API Request Tool) so that VAPI forwards the full call object including metadata.
     const metaBusinessId = call?.metadata?.businessId;
     if (metaBusinessId) {
         console.log(`[VAPI] resolving via call metadata: ${metaBusinessId}`);
@@ -333,37 +441,38 @@ async function _resolveBusinessContext(call) {
             orderBy: { createdAt: "desc" },
         });
         if (ctx) {
-            console.log(`[VAPI] Selected row — id: ${ctx.id}, businessId: ${ctx.businessId}, createdAt: ${ctx.createdAt}`);
+            console.log(`[VAPI] resolved — id: ${ctx.id}, businessId: ${ctx.businessId}`);
             return ctx;
         }
-        console.log("[VAPI] WARNING: call metadata businessId matched no row, falling through");
+        console.warn(`[VAPI] WARNING: call metadata businessId ${metaBusinessId} matched no BusinessContext row`);
     }
 
-    // 2. VAPI dashboard "Talk" button testing — pin to a specific business via env var
+    // 2. VAPI dashboard "Talk" button testing — set VAPI_TEST_BUSINESS_ID to a real
+    //    business UUID in .env to pin dashboard test calls to a specific business.
+    //    Wrapped in try/catch: an invalid UUID (e.g. the placeholder "some-business-id")
+    //    causes a PostgreSQL type error; log and fall through rather than crash.
     const testBusinessId = process.env.VAPI_TEST_BUSINESS_ID;
     if (testBusinessId) {
         console.log(`[VAPI] resolving via VAPI_TEST_BUSINESS_ID: ${testBusinessId}`);
-        const ctx = await prisma.businessContext.findFirst({
-            where:   { businessId: testBusinessId },
-            orderBy: { createdAt: "desc" },
-        });
-        if (ctx) {
-            console.log(`[VAPI] Selected row — id: ${ctx.id}, businessId: ${ctx.businessId}, createdAt: ${ctx.createdAt}`);
-            return ctx;
+        try {
+            const ctx = await prisma.businessContext.findFirst({
+                where:   { businessId: testBusinessId },
+                orderBy: { createdAt: "desc" },
+            });
+            if (ctx) {
+                console.log(`[VAPI] resolved — id: ${ctx.id}, businessId: ${ctx.businessId}`);
+                return ctx;
+            }
+            console.warn(`[VAPI] WARNING: VAPI_TEST_BUSINESS_ID ${testBusinessId} matched no row`);
+        } catch (err) {
+            console.warn(`[VAPI] WARNING: VAPI_TEST_BUSINESS_ID query failed (invalid UUID?): ${err.message}`);
         }
-        console.log("[VAPI] WARNING: VAPI_TEST_BUSINESS_ID matched no row, falling through to most-recent");
     }
 
-    // 3. Fallback: pin to XP League context (mirrors /api/demo/info logic)
-    console.log("[VAPI] resolving via fallback (XP League BusinessContext)");
-    const fallback = await prisma.businessContext.findFirst({
-        where: {
-            websiteUrl: { contains: "xpleague.com" },
-            content:    { not: null },
-            AND:        { content: { not: "" } },
-        },
-        orderBy: { createdAt: "desc" },
-    });
-    console.log(`[VAPI] Selected row — id: ${fallback?.id}, businessId: ${fallback?.businessId}, createdAt: ${fallback?.createdAt}`);
-    return fallback;
+    // No context resolved — callers handle null:
+    //   _handleGetBusinessInfo  → returns "I don't have business information loaded yet."
+    //   _handleCaptureLead      → returns a warm hold message, skips DB write
+    //   handleVapiWebhook       → skips conversation row creation
+    console.warn("[VAPI] _resolveBusinessContext: no business context resolved — returning null");
+    return null;
 }

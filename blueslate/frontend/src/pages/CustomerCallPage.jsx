@@ -1,12 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, CheckCircle2, Moon, Sun } from "lucide-react";
-import AIConversationTester from "../components/AIConversationTester";
-import { LeadCaptureForm, PostConvOverlay, FollowUpPrompt } from "../components/CustomerPortalComponents";
+import { ArrowLeft, Phone, CheckCircle2, Moon, Sun, Loader2 } from "lucide-react";
 import { useTheme } from "../hooks/useTheme";
 import { API_BASE_URL } from "../utils/api";
 
-// ── Dialing trust checkmark ───────────────────────────────────────────────────
+// ── Animated trust-check row (shown on the "calling you now" screen) ──────────
 
 function TrustCheck({ delay, text }) {
     const [visible, setVisible] = useState(false);
@@ -21,22 +19,6 @@ function TrustCheck({ delay, text }) {
         </div>
     );
 }
-
-// ── Session helpers ────────────────────────────────────────────────────────────
-
-function loadCallSession(token) {
-    try {
-        const s = sessionStorage.getItem(`portal_call_${token}`);
-        return s ? JSON.parse(s) : null;
-    } catch { return null; }
-}
-
-function saveCallSession(token, data) {
-    try {
-        sessionStorage.setItem(`portal_call_${token}`, JSON.stringify(data));
-    } catch { /* non-fatal */ }
-}
-
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -63,324 +45,199 @@ export default function CustomerCallPage() {
     const receptionistName = sessionData?.receptionistName || "Virtual Receptionist";
     const website          = sessionData?.website          || "";
 
-    // Hydrate persisted call state
-    const [callPersist]  = useState(() => loadCallSession(token));
-    const wasCallStarted = callPersist?.callStarted || false;
+    // ── Form state ────────────────────────────────────────────────────────────
+    const [phone,    setPhone]    = useState("");
+    const [loading,  setLoading]  = useState(false);
+    const [error,    setError]    = useState(null);
+    const [calling,  setCalling]  = useState(false); // "we're calling you now" screen
 
-    // Dialing flow (skipped entirely on refresh if call was already active)
-    const [isDialing,   setIsDialing]   = useState(!wasCallStarted);
-    const [isConnected, setIsConnected] = useState(false);
-    const [callActive,  setCallActive]  = useState(wasCallStarted);
-
-    // Persisted transcript (updated via onMessagesChange from AIConversationTester)
-    const [callMessages, setCallMessages] = useState(callPersist?.messages || []);
-
-    // callStartTime — persisted when call first becomes active
-    const callStartTimeRef = useRef(callPersist?.callStartTime || null);
-
-    // Compute elapsed seconds for timer resume (only meaningful on refresh)
-    const initialCallSeconds = callPersist?.callStartTime
-        ? Math.max(0, Math.floor((Date.now() - new Date(callPersist.callStartTime).getTime()) / 1000))
-        : 0;
-
-    // Skip greeting TTS + replay when restoring an already-started call
-    const skipGreeting = wasCallStarted;
-
-    // Post-call state (hydrate from persist so outcome screen survives refresh)
-    const [callEnded,           setCallEnded]           = useState(callPersist?.callEnded           || false);
-    const [thankYouVariant,     setThankYouVariant]     = useState(callPersist?.thankYouVariant     || null);
-    const [callDurationSeconds, setCallDurationSeconds] = useState(callPersist?.callDurationSeconds ?? null);
-    const [callOutcome,         setCallOutcome]         = useState(callPersist?.callOutcome         || "INFORMATION_ONLY");
-    const [capturedLeadData,    setCapturedLeadData]    = useState(callPersist?.capturedLeadData    || null);
-
-    // Lead form
-    const [showLeadForm,       setShowLeadForm]       = useState(callPersist?.showLeadForm    || false);
-    const [leadFormLoading,    setLeadFormLoading]    = useState(false);
-    const [leadFormError,      setLeadFormError]      = useState(null);
-    const [postConvConvId,     setPostConvConvId]     = useState(callPersist?.postConvConvId  || null);
-    const [showFollowUpPrompt, setShowFollowUpPrompt] = useState(false);
-
-    // ── Persist to sessionStorage on every state change ───────────────────────
-    useEffect(() => {
-        if (!sessionData) return;
-        saveCallSession(token, {
-            callStarted:        callActive,
-            callStartTime:      callStartTimeRef.current,
-            messages:           callMessages,
-            callEnded,
-            thankYouVariant,
-            callDurationSeconds,
-            callOutcome,
-            capturedLeadData,
-            showLeadForm,
-            postConvConvId,
-        });
-    }, [callActive, callMessages, callEnded, thankYouVariant, callDurationSeconds, callOutcome, capturedLeadData, showLeadForm, postConvConvId, token, sessionData]);
-
-    // ── Dialing sequence (skipped when restoring an active call) ─────────────
-    useEffect(() => {
-        if (!sessionData || wasCallStarted) return;
-        const t1 = setTimeout(() => {
-            setIsDialing(false);
-            setIsConnected(true);
-            const t2 = setTimeout(() => {
-                setIsConnected(false);
-                callStartTimeRef.current = new Date().toISOString();
-                setCallActive(true);
-            }, 700);
-            return () => clearTimeout(t2);
-        }, 2800);
-        return () => clearTimeout(t1);
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-    const callGreeting = businessName
-        ? `Hi! Thank you for calling ${businessName}. This is ${receptionistName}. How can I help you today?`
-        : `Hi! This is ${receptionistName}. How can I help you today?`;
-
-    // ── Handlers ─────────────────────────────────────────────────────────────
-
-    // Back: preserve call session — only Done clears sessionStorage
+    // ── Navigation ────────────────────────────────────────────────────────────
     const handleBack = useCallback(() => {
         navigate("/customer", { state: { step: 2, businessName, receptionistName, website, token } });
     }, [token, businessName, receptionistName, website, navigate]);
 
-    // Done: clear only the call session, keep portal session, return to Step 2
     const handleDone = useCallback(() => {
-        sessionStorage.removeItem(`portal_call_${token}`);
         navigate("/customer", { state: { step: 2, businessName, receptionistName, website, token } });
     }, [token, businessName, receptionistName, website, navigate]);
 
-    // Call Again: clear call session, start fresh at the same route
-    const handleRetry = useCallback(() => {
-        sessionStorage.removeItem(`portal_call_${token}`);
-        navigate(`/receptionist/${token}`, { state: { businessName, receptionistName, website } });
-    }, [token, businessName, receptionistName, website, navigate]);
-
-    const handleMessagesChange = useCallback((msgs) => {
-        setCallMessages(msgs);
-    }, []);
-
-    const portalSendMessage = async (content, existingConvId) => {
-        const res  = await fetch(`${API_BASE_URL}/portal/chat`, {
-            method:  "POST",
-            headers: { "Content-Type": "application/json" },
-            body:    JSON.stringify({
-                conversationToken: token,
-                question:          content,
-                conversationId:    existingConvId ?? null,
-                source:            "customer_portal_voice",
-            }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message ?? "Something went wrong.");
-        return data.data;
-    };
-
-    const handleCallEnd = (callData) => {
-        // Fire-and-forget — do not block the follow-up prompt on network latency
-        if (callData?.conversationId) {
-            fetch(`${API_BASE_URL}/portal/finalize/${callData.conversationId}`, {
-                method:  "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body:    JSON.stringify({
-                    conversationToken: token,
-                    metadata: {
-                        durationSeconds: callData.durationSeconds ?? null,
-                        outcome:         callData.outcome         ?? "INFORMATION_ONLY",
-                        lastIntent:      callData.lastIntent      ?? null,
-                        startedAt:       callData.startedAt       ?? null,
-                        lead:            callData.lead            ?? null,
-                    },
-                }),
-            }).catch(() => {});
+    // ── Call Me ───────────────────────────────────────────────────────────────
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        const raw = phone.trim();
+        if (!raw) {
+            setError("Please enter your phone number.");
+            return;
         }
-
-        const dur  = callData?.durationSeconds ?? null;
-        const outc = callData?.outcome ?? "INFORMATION_ONLY";
-        setCallDurationSeconds(dur);
-        setCallOutcome(outc);
-
-        // Store any inline lead data
-        const inlineLead = callData?.lead;
-        if (inlineLead && (inlineLead.name || inlineLead.email || inlineLead.phone)) {
-            setCapturedLeadData(inlineLead);
-        }
-
-        // If lead was captured inline, skip follow-up prompt and go directly to outcome
-        if (callData?.leadCapturedInline) {
-            setCallEnded(true);
+        const digits = raw.replace(/\D/g, "");
+        const validE164 = raw.startsWith("+") && digits.length >= 7 && digits.length <= 15;
+        const validUS10 = !raw.startsWith("+") && digits.length === 10;
+        if (!validE164 && !validUS10) {
+            setError("Enter a valid number — international format (e.g. +917205672015) or 10-digit US number.");
             return;
         }
 
-        // Store convId for the lead form (in case user says Yes to follow-up)
-        if (callData?.conversationId) {
-            setPostConvConvId(callData.conversationId);
-        }
-
-        // Always ask follow-up question before showing outcome
-        setShowFollowUpPrompt(true);
-    };
-
-    const handleFollowUpYes = () => {
-        setShowFollowUpPrompt(false);
-        setShowLeadForm(true);
-    };
-
-    const handleFollowUpNo = () => {
-        setShowFollowUpPrompt(false);
-        setCallOutcome("INFORMATION_ONLY");
-        setCallEnded(true);
-    };
-
-    const handleLeadFormSubmit = async ({ name, email, phone, notes }) => {
-        setLeadFormLoading(true);
-        setLeadFormError(null);
+        setError(null);
+        setLoading(true);
         try {
-            const res  = await fetch(`${API_BASE_URL}/portal/leads`, {
+            const res = await fetch(`${API_BASE_URL}/portal/call-me`, {
                 method:  "POST",
                 headers: { "Content-Type": "application/json" },
-                body:    JSON.stringify({
-                    conversationToken: token,
-                    name, email, phone, notes,
-                    conversationId:    postConvConvId,
-                }),
+                body:    JSON.stringify({ conversationToken: token, phone: raw }),
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.message ?? "Something went wrong.");
-            setShowLeadForm(false);
-            setCapturedLeadData({ name, email, phone });
-            setThankYouVariant("submitted");
-            setCallOutcome("LEAD_CAPTURED");
-            setCallEnded(true);
+            if (!res.ok) throw new Error(data.message ?? "Something went wrong. Please try again.");
+            setCalling(true);
         } catch (err) {
-            setLeadFormError(err.message);
+            setError(err.message);
         } finally {
-            setLeadFormLoading(false);
+            setLoading(false);
         }
-    };
-
-    const handleLeadFormSkip = () => {
-        setShowLeadForm(false);
-        setThankYouVariant("skipped");
-        setCallEnded(true);
     };
 
     if (!sessionData) return null;
 
-    // ── Render ────────────────────────────────────────────────────────────────
+    // ── "We're calling you now" screen ────────────────────────────────────────
+    if (calling) {
+        return (
+            <div className="fixed inset-0 z-50 bg-gray-950 flex flex-col px-8">
+                {/* Top bar */}
+                <div className="pt-5 pb-2 shrink-0 flex items-center justify-between">
+                    <button
+                        onClick={handleDone}
+                        className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                    >
+                        <ArrowLeft size={13} />
+                        Back to Portal
+                    </button>
+                    <button
+                        onClick={toggle}
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-all"
+                        title={dark ? "Light mode" : "Dark mode"}
+                    >
+                        {dark ? <Sun size={15} /> : <Moon size={15} />}
+                    </button>
+                </div>
 
+                {/* Content */}
+                <div className="flex-1 flex flex-col items-center justify-center">
+                    {/* Business avatar */}
+                    <div className="w-16 h-16 rounded-2xl bg-blue-600/15 border border-blue-500/25 flex items-center justify-center mb-6">
+                        <span className="text-2xl font-black text-blue-400">
+                            {(businessName || "B").charAt(0).toUpperCase()}
+                        </span>
+                    </div>
+
+                    <p className="text-white text-xl font-bold mb-1 text-center">Your phone will ring shortly</p>
+                    <p className="text-gray-400 text-sm mb-8 text-center">
+                        {receptionistName} from {businessName} is calling {phone}
+                    </p>
+
+                    {/* Trust checkmarks */}
+                    <div className="w-full max-w-xs space-y-3.5 mb-10">
+                        <TrustCheck delay={200}  text={`Connected to ${businessName}`} />
+                        <TrustCheck delay={500}  text="AI receptionist is ready to assist you" />
+                        <TrustCheck delay={900}  text="This call may be recorded for follow-up purposes" />
+                    </div>
+
+                    {/* Pulse ring animation */}
+                    <div className="relative flex items-center justify-center mb-8">
+                        <span className="absolute inline-flex h-14 w-14 rounded-full bg-green-400/20 animate-ping" />
+                        <div className="relative w-14 h-14 rounded-full bg-green-500/20 border border-green-500/30 flex items-center justify-center">
+                            <Phone size={22} className="text-green-400" />
+                        </div>
+                    </div>
+
+                    <button
+                        onClick={handleDone}
+                        className="text-sm text-gray-500 hover:text-gray-300 underline underline-offset-2 transition-colors"
+                    >
+                        Done
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // ── Phone number form ─────────────────────────────────────────────────────
     return (
-        <>
-            {/* Dialing overlay — trust frame */}
-            {isDialing && (
-                <div className="fixed inset-0 z-50 bg-gray-950 flex flex-col px-8">
-                    {/* Back + theme toggle row */}
-                    <div className="pt-5 pb-2 shrink-0 flex items-center justify-between">
-                        <button
-                            onClick={handleBack}
-                            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
-                        >
-                            <ArrowLeft size={13} />
-                            Back to Portal
-                        </button>
-                        <button
-                            onClick={toggle}
-                            className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-all"
-                            title={dark ? "Light mode" : "Dark mode"}
-                        >
-                            {dark ? <Sun size={15} /> : <Moon size={15} />}
-                        </button>
-                    </div>
-                    <div className="flex-1 flex flex-col items-center justify-center">
-                        <div className="w-16 h-16 rounded-2xl bg-blue-600/15 border border-blue-500/25 flex items-center justify-center mb-6">
-                            <span className="text-2xl font-black text-blue-400">
-                                {(businessName || "B").charAt(0).toUpperCase()}
-                            </span>
-                        </div>
-                        <p className="text-white text-lg font-bold mb-8 text-center">Calling {businessName}</p>
-                        <div className="w-full max-w-xs space-y-3.5 mb-8">
-                            <TrustCheck delay={120} text={`Connected to ${businessName}`} />
-                            <TrustCheck delay={350} text="Receptionist available" />
-                            <TrustCheck delay={620} text="This conversation may be recorded for follow-up purposes" />
-                        </div>
-                        <div className="flex items-center gap-2">
-                            {[0, 150, 300].map((d) => (
-                                <span key={d} className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: `${d}ms` }} />
-                            ))}
-                            <span className="text-sm text-gray-400 ml-1">Connecting...</span>
-                        </div>
-                    </div>
+        <div className="fixed inset-0 z-50 bg-gray-950 flex flex-col px-8">
+            {/* Top bar */}
+            <div className="pt-5 pb-2 shrink-0 flex items-center justify-between">
+                <button
+                    onClick={handleBack}
+                    className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                >
+                    <ArrowLeft size={13} />
+                    Back to Portal
+                </button>
+                <button
+                    onClick={toggle}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-all"
+                    title={dark ? "Light mode" : "Dark mode"}
+                >
+                    {dark ? <Sun size={15} /> : <Moon size={15} />}
+                </button>
+            </div>
+
+            {/* Form */}
+            <div className="flex-1 flex flex-col items-center justify-center">
+                {/* Business avatar */}
+                <div className="w-16 h-16 rounded-2xl bg-blue-600/15 border border-blue-500/25 flex items-center justify-center mb-6">
+                    <span className="text-2xl font-black text-blue-400">
+                        {(businessName || "B").charAt(0).toUpperCase()}
+                    </span>
                 </div>
-            )}
 
-            {/* Connected moment — brief transition screen */}
-            {isConnected && (
-                <div className="fixed inset-0 z-50 bg-gray-950 flex flex-col items-center justify-center gap-4 px-8">
-                    <div className="w-14 h-14 rounded-full bg-green-500/20 border border-green-500/30 flex items-center justify-center">
-                        <CheckCircle2 size={28} className="text-green-400" />
+                <p className="text-white text-xl font-bold mb-1 text-center">Talk to {receptionistName}</p>
+                <p className="text-gray-400 text-sm mb-8 text-center max-w-xs">
+                    Enter your phone number and {businessName || "the business"} will call you right now.
+                </p>
+
+                <form onSubmit={handleSubmit} className="w-full max-w-xs space-y-4">
+                    <div>
+                        <label htmlFor="phone" className="block text-xs text-gray-400 mb-1.5">
+                            Your phone number
+                        </label>
+                        <input
+                            id="phone"
+                            type="tel"
+                            inputMode="tel"
+                            autoComplete="tel"
+                            placeholder="+1 (555) 123-4567"
+                            value={phone}
+                            onChange={(e) => { setPhone(e.target.value); setError(null); }}
+                            disabled={loading}
+                            className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-gray-600 text-sm focus:outline-none focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/30 disabled:opacity-50 transition-all"
+                        />
                     </div>
-                    <div className="text-center">
-                        <p className="text-white text-lg font-bold">Connected</p>
-                        <p className="text-gray-400 text-sm mt-1">{receptionistName} has joined the call</p>
-                    </div>
-                </div>
-            )}
 
-            {/* Active voice call */}
-            {callActive && !callEnded && !showLeadForm && (
-                <AIConversationTester
-                    greeting={callGreeting}
-                    businessName={businessName}
-                    businessContextId=""
-                    businessContextUrl={website}
-                    mode="receptionist"
-                    agentName={receptionistName}
-                    portalMode={true}
-                    sendMessage={portalSendMessage}
-                    onCallEnd={handleCallEnd}
-                    initialMessages={callMessages}
-                    onMessagesChange={handleMessagesChange}
-                    skipGreeting={skipGreeting}
-                    initialCallSeconds={initialCallSeconds}
-                />
-            )}
+                    {error && (
+                        <p className="text-red-400 text-xs leading-snug">{error}</p>
+                    )}
 
-            {/* Follow-up prompt — shown before lead form */}
-            {showFollowUpPrompt && !callEnded && !showLeadForm && (
-                <FollowUpPrompt
-                    businessName={businessName}
-                    mode="call"
-                    onYes={handleFollowUpYes}
-                    onNo={handleFollowUpNo}
-                />
-            )}
+                    <button
+                        type="submit"
+                        disabled={loading || !phone.trim()}
+                        className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition-all"
+                    >
+                        {loading ? (
+                            <>
+                                <Loader2 size={15} className="animate-spin" />
+                                Placing call…
+                            </>
+                        ) : (
+                            <>
+                                <Phone size={15} />
+                                Call Me Now
+                            </>
+                        )}
+                    </button>
 
-            {/* Post-call lead capture form */}
-            {showLeadForm && !callEnded && (
-                <LeadCaptureForm
-                    businessName={businessName}
-                    onSubmit={handleLeadFormSubmit}
-                    onSkip={handleLeadFormSkip}
-                    loading={leadFormLoading}
-                    error={leadFormError}
-                />
-            )}
-
-            {/* Post-call outcome screen */}
-            {callEnded && (
-                <PostConvOverlay
-                    mode="call"
-                    businessName={businessName}
-                    website={website}
-                    thankYouVariant={thankYouVariant}
-                    outcome={callOutcome}
-                    durationSeconds={callDurationSeconds}
-                    capturedLeadData={capturedLeadData}
-                    onLeaveDetails={() => { setCallEnded(false); setThankYouVariant(null); setShowLeadForm(true); }}
-                    onRetry={handleRetry}
-                    onDone={handleDone}
-                />
-            )}
-        </>
+                    <p className="text-center text-xs text-gray-600">
+                        Standard call rates apply. The AI receptionist will call you within seconds.
+                    </p>
+                </form>
+            </div>
+        </div>
     );
 }

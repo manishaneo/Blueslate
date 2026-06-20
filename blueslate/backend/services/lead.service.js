@@ -98,6 +98,22 @@ export const findLeadByEmail = async (email, contextIds = null) => {
 };
 
 /**
+ * Find a lead by phone number, scoped to a specific set of business context IDs.
+ * Same scoping contract as findLeadByEmail — used as a fallback dedup check
+ * when a caller provides only a phone number (no email).
+ */
+export const findLeadByPhone = async (phone, contextIds = null) => {
+    if (contextIds !== null && contextIds.length === 0) return null;
+
+    const where = { phone };
+    if (contextIds !== null) {
+        where.businessContextId = { in: contextIds };
+    }
+
+    return prisma.lead.findFirst({ where });
+};
+
+/**
  * Return all leads belonging to the active business.
  * Returns [] when the user has no membership or no scraped context yet.
  */

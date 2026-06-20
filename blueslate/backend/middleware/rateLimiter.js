@@ -87,6 +87,13 @@ export const portalLeadsLimiter = rateLimit({
     limit:    10,
 });
 
+// Call Me: 5 req / 10 min per IP — each request places a real outbound call
+export const portalCallMeLimiter = rateLimit({
+    ...defaults,
+    windowMs: 10 * 60 * 1000,
+    limit:    5,
+});
+
 // ── Demo ───────────────────────────────────────────────────────────────────────
 // Both endpoints are fully public and expensive:
 //   /scrape — fetches external URLs at the server's bandwidth cost (SSRF risk)

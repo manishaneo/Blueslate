@@ -71,7 +71,9 @@ function callLastIntent(call) {
     return call.metadata?.lastIntent ?? null;
 }
 function callLead(call) {
-    return call.metadata?.lead ?? null;
+    // metadata.lead is set by the browser voice finalize flow.
+    // call.lead is the DB-joined Lead for VAPI outbound calls.
+    return call.metadata?.lead ?? call.lead ?? null;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

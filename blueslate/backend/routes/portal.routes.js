@@ -2,13 +2,15 @@ import { Router }           from "express";
 import { handleLookup,
          handlePortalChat,
          handlePortalFinalize,
-         handlePortalLeadCreate } from "../controllers/portal.controller.js";
+         handlePortalLeadCreate,
+         handleCallMe } from "../controllers/portal.controller.js";
 import {
     portalLookupLimiter,
     portalChatIpLimiter,
     portalChatTokenLimiter,
     portalFinalizeLimiter,
     portalLeadsLimiter,
+    portalCallMeLimiter,
 } from "../middleware/rateLimiter.js";
 
 const router = Router();
@@ -27,5 +29,8 @@ router.patch ("/finalize/:conversationId", portalFinalizeLimiter,               
 
 // POST /api/portal/leads            — 10 req / 10 min per IP
 router.post  ("/leads",                    portalLeadsLimiter,                                 handlePortalLeadCreate);
+
+// POST /api/portal/call-me          — 5 req / 10 min per IP (each request dials a real phone)
+router.post  ("/call-me",                  portalCallMeLimiter,                                handleCallMe);
 
 export default router;
