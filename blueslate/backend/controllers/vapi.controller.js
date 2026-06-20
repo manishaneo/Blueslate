@@ -36,16 +36,25 @@ export async function handleVapiToolCall(req, res) {
 async function _handleApiRequestFormat(req, res) {
     console.log("[VAPI] Format: API Request Tool");
 
+    // API Request Tools do not forward the VAPI call envelope, so call.metadata is
+    // unavailable by default. Recover businessId from req.body.businessId, which is
+    // populated when the tool's Request Body template in the VAPI dashboard includes:
+    //   businessId = "{{call.metadata.businessId}}"
+    // If the tool is switched to Server URL type, _handleWebhookFormat handles this
+    // automatically via message.call.metadata.businessId and this path is not taken.
+    const bodyBusinessId = req.body?.businessId ?? null;
+    const call = bodyBusinessId ? { metadata: { businessId: bodyBusinessId } } : null;
+
     // Discriminate by which parameters are present.
     // captureLead sends { name?, email?, phone?, interest? } — no "query" key.
     if (req.body?.query !== undefined) {
-        const result = await _handleGetBusinessInfo(null, req.body.query);
+        const result = await _handleGetBusinessInfo(call, req.body.query);
         console.log("[VAPI] getBusinessInfo result:", result);
         return res.json({ result });
     }
 
     // captureLead — at least one contact field expected
-    const result = await _handleCaptureLead(null, req.body ?? {});
+    const result = await _handleCaptureLead(call, req.body ?? {});
     console.log("[VAPI] captureLead result:", result);
     return res.json({ result });
 }
@@ -449,10 +458,10 @@ async function _resolveBusinessContext(call) {
 
     // 2. VAPI dashboard "Talk" button testing — set VAPI_TEST_BUSINESS_ID to a real
     //    business UUID in .env to pin dashboard test calls to a specific business.
-    //    Wrapped in try/catch: an invalid UUID (e.g. the placeholder "some-business-id")
-    //    causes a PostgreSQL type error; log and fall through rather than crash.
+    //    Rejected if not a valid UUID: prevents placeholder values from hitting the DB.
     const testBusinessId = process.env.VAPI_TEST_BUSINESS_ID;
-    if (testBusinessId) {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (testBusinessId && UUID_RE.test(testBusinessId)) {
         console.log(`[VAPI] resolving via VAPI_TEST_BUSINESS_ID: ${testBusinessId}`);
         try {
             const ctx = await prisma.businessContext.findFirst({
