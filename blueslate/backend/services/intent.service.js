@@ -257,14 +257,14 @@ function detectSmallTalkSubtype(normalized) {
 }
 
 const SMALL_TALK_RESPONSES = {
-    greeting:  (name) => name
-        ? `Thank you for calling ${name}! This is Auri, your AI receptionist. How can I help you today?`
-        : "Thank you for calling! This is Auri, your AI receptionist. How can I help you today?",
-    wellbeing: (name) => name
-        ? `I'm doing great, thank you for asking! I'm Auri, your AI receptionist for ${name}. What can I help you with today?`
-        : "I'm doing great, thank you for asking! I'm Auri, your AI receptionist. What can I help you with today?",
-    thanks:    ()     => "Of course! Is there anything else I can help you with today?",
-    farewell:  ()     => "Thank you for calling. It was a pleasure helping you — have a wonderful day!",
+    greeting:  (name, persona) => name
+        ? `Thank you for calling ${name}! This is ${persona}, your AI receptionist. How can I help you today?`
+        : `Thank you for calling! This is ${persona}, your AI receptionist. How can I help you today?`,
+    wellbeing: (name, persona) => name
+        ? `I'm doing great, thank you for asking! I'm ${persona}, your AI receptionist for ${name}. What can I help you with today?`
+        : `I'm doing great, thank you for asking! I'm ${persona}, your AI receptionist. What can I help you with today?`,
+    thanks:    ()              => "Of course! Is there anything else I can help you with today?",
+    farewell:  ()              => "Thank you for calling. It was a pleasure helping you — have a wonderful day!",
 };
 
 // ── public API ───────────────────────────────────────────────────────────────
@@ -295,7 +295,7 @@ export const detectIntent = (message) => {
     };
 };
 
-export const getSmallTalkResponse = (intentData, businessName) => {
+export const getSmallTalkResponse = (intentData, businessName, personaName = null) => {
     const fn = SMALL_TALK_RESPONSES[intentData.subtype] ?? SMALL_TALK_RESPONSES.greeting;
-    return fn(businessName || null);
+    return fn(businessName || null, personaName || "Auri");
 };

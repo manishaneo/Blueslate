@@ -88,7 +88,7 @@ export const answerQuestionNoStore = async (userId, question, activeBusinessId) 
     const leadData   = extractLeadData(question);
 
     if (intentData.intent === "small_talk") {
-        const answer = getSmallTalkResponse(intentData, businessContext.title);
+        const answer = getSmallTalkResponse(intentData, businessContext.title, settings?.aiPersonaName ?? null);
         return { answer, intent: intentData, conversationId: null, leadData };
     }
 
@@ -118,7 +118,7 @@ export const answerQuestion = async (userId, question, activeBusinessId, convers
     const intentData = detectIntent(question);
 
     if (intentData.intent === "small_talk") {
-        const answer  = getSmallTalkResponse(intentData, businessContext.title);
+        const answer  = getSmallTalkResponse(intentData, businessContext.title, settings?.aiPersonaName ?? null);
         const savedId = await persistConversationTurn(
             businessId, businessContext.id, conversationId, source, question, answer, null,
             businessContext.title ?? ""

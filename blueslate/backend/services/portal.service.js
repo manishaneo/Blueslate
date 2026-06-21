@@ -214,7 +214,7 @@ export async function portalChat(conversationToken, question, conversationId, so
     let createdLeadId = null;
 
     if (intentData.intent === "small_talk") {
-        answer = getSmallTalkResponse(intentData, businessContext.title);
+        answer = getSmallTalkResponse(intentData, businessContext.title, bizSettings?.aiPersonaName ?? null);
     } else if (!businessContext.content) {
         answer = "I don't have information available for this business yet.";
     } else {
