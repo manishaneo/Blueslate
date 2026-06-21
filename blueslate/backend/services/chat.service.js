@@ -8,13 +8,19 @@ import { generateGroqAnswer, generateConversationSummary } from "./groq.service.
 
 async function resolveBusinessAndContext(userId, activeBusinessId) {
     const businessId = await resolveActiveBusiness(userId, activeBusinessId);
-    if (!businessId) return { businessId: null, businessContext: null };
+    if (!businessId) return { businessId: null, businessContext: null, settings: null };
 
-    const businessContext = await prisma.businessContext.findFirst({
-        where:   { businessId },
-        orderBy: { createdAt: "desc" },
-    });
-    return { businessId, businessContext };
+    const [businessContext, settings] = await Promise.all([
+        prisma.businessContext.findFirst({
+            where:   { businessId },
+            orderBy: { createdAt: "desc" },
+        }),
+        prisma.businessSettings.findUnique({
+            where:  { businessId },
+            select: { aiPersonaName: true, tone: true, language: true, greeting: true },
+        }),
+    ]);
+    return { businessId, businessContext, settings };
 }
 
 async function persistConversationTurn(businessId, businessContextId, conversationId, source, question, answer, createdLeadId, businessTitle = "") {
@@ -72,7 +78,7 @@ async function persistConversationTurn(businessId, businessContextId, conversati
 }
 
 export const answerQuestionNoStore = async (userId, question, activeBusinessId) => {
-    const { businessId, businessContext } = await resolveBusinessAndContext(userId, activeBusinessId);
+    const { businessId, businessContext, settings } = await resolveBusinessAndContext(userId, activeBusinessId);
 
     if (!businessContext) {
         throw new Error("No business context found. Please complete your business setup first.");
@@ -94,7 +100,7 @@ export const answerQuestionNoStore = async (userId, question, activeBusinessId) 
 
     let answer;
     try {
-        answer = await generateGroqAnswer(retrievedContext, question, businessContext.title ?? "");
+        answer = await generateGroqAnswer(retrievedContext, question, businessContext.title ?? "", settings ?? {});
     } catch {
         answer = retrievedContext;
     }
@@ -103,7 +109,7 @@ export const answerQuestionNoStore = async (userId, question, activeBusinessId) 
 };
 
 export const answerQuestion = async (userId, question, activeBusinessId, conversationId = null, source = "business_chat") => {
-    const { businessId, businessContext } = await resolveBusinessAndContext(userId, activeBusinessId);
+    const { businessId, businessContext, settings } = await resolveBusinessAndContext(userId, activeBusinessId);
 
     if (!businessContext) {
         throw new Error("No business context found. Please complete your business setup first.");
@@ -142,11 +148,14 @@ export const answerQuestion = async (userId, question, activeBusinessId, convers
 
     const retrievedContext = await askGemini(businessContext.content, question);
 
+    const isFirstMessage = conversationId === null;
+    const activeSettings = isFirstMessage ? (settings ?? {}) : { ...settings, greeting: undefined };
+
     let answer;
     try {
         console.log("[DEBUG] retrievedContext:", retrievedContext);
         console.log("[DEBUG] question:", question);
-        answer = await generateGroqAnswer(retrievedContext, question, businessContext.title ?? "");
+        answer = await generateGroqAnswer(retrievedContext, question, businessContext.title ?? "", activeSettings);
         console.log("[GROQ USED]");
     } catch (err) {
         console.log("[GROQ FALLBACK]");

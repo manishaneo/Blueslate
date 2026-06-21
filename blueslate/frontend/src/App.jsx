@@ -18,6 +18,8 @@ import ThemeToggle from "./components/ThemeToggle";
 import LoginPage from "./pages/LoginPage";
 import AdminLoginPage from "./pages/AdminLoginPage";
 import JoinPage from "./pages/JoinPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import AddBusinessPage from "./pages/AddBusinessPage";
 import CustomerPortalPage from "./pages/CustomerPortalPage";
 import CustomerChatPage from "./pages/CustomerChatPage";
@@ -28,7 +30,7 @@ import DemoPage from "./pages/DemoPage";
 
 const ADMIN_PATHS = ["/dashboard", "/leads", "/conversations", "/call-history", "/analytics", "/knowledge-base", "/settings", "/test-ai", "/app-admin"];
 // Pages that manage their own inline theme toggle — suppress the global floating button
-const NO_FLOAT_TOGGLE = new Set(["/", "/login", "/admin-login", "/join", "/business-setup", "/add-business", "/customer", "/disabled", "/demo"]);
+const NO_FLOAT_TOGGLE = new Set(["/", "/login", "/admin-login", "/join", "/business-setup", "/add-business", "/customer", "/disabled", "/demo", "/forgot-password", "/reset-password"]);
 
 function GlobalThemeToggle() {
     const { pathname } = useLocation();
@@ -50,6 +52,8 @@ function App() {
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/admin-login" element={<AdminLoginPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
                 <Route path="/disabled" element={<DisabledBusinessPage />} />
                 <Route path="/customer" element={<CustomerPortalPage />} />
                 <Route path="/chat/:token" element={<CustomerChatPage />} />

@@ -129,6 +129,37 @@ function formatTs(ts) {
     return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
+// ── CSV export ────────────────────────────────────────────────────────────────
+
+function escapeCSV(val) {
+    if (val == null) return "";
+    const s = String(val);
+    return s.includes(",") || s.includes('"') || s.includes("\n")
+        ? `"${s.replace(/"/g, '""')}"`
+        : s;
+}
+
+function buildCSV(calls) {
+    const rows = [
+        ["Date", "Duration (s)", "Duration", "Outcome", "Last Intent", "Lead Name", "Lead Email", "Lead Phone", "Summary"],
+    ];
+    for (const call of calls) {
+        const lead = callLead(call);
+        rows.push([
+            callStartedAt(call) ? new Date(callStartedAt(call)).toISOString() : "",
+            callDuration(call) ?? "",
+            formatDuration(callDuration(call)),
+            callOutcome(call) ?? "",
+            callLastIntent(call) ?? "",
+            lead?.name  ?? "",
+            lead?.email ?? "",
+            lead?.phone ?? "",
+            call.summary ?? "",
+        ]);
+    }
+    return "\uFEFF" + rows.map((r) => r.map(escapeCSV).join(",")).join("\r\n");
+}
+
 // ── sub-components ────────────────────────────────────────────────────────────
 
 function OutcomeBadge({ outcome }) {
@@ -436,6 +467,18 @@ export default function CallHistoryPage() {
         });
     }, [calls, search, statusFilter, dateFilter]);
 
+    const handleExport = () => {
+        if (!filtered.length) return;
+        const csv  = buildCSV(filtered);
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
+        a.href     = url;
+        a.download = `call-history-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
     const KPI_CARDS = [
         { label: "Calls Answered",   value: stats.total,     Icon: PhoneCall,     iconBg: "bg-blue-100 dark:bg-blue-900/30",    iconCls: "text-blue-600 dark:text-blue-400",    valCls: "text-blue-600 dark:text-blue-400"    },
         { label: "Leads Captured",   value: stats.leads,     Icon: Users,         iconBg: "bg-green-100 dark:bg-green-900/30",  iconCls: "text-green-600 dark:text-green-400",  valCls: "text-green-600 dark:text-green-400"  },
@@ -508,8 +551,10 @@ export default function CallHistoryPage() {
                     <div className="flex-1 hidden sm:block" />
 
                     <button
-                        onClick={() => {}}
-                        className="flex items-center gap-1.5 text-sm h-9 px-3.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 font-medium transition-colors"
+                        onClick={handleExport}
+                        disabled={filtered.length === 0}
+                        title={filtered.length === 0 ? "No calls to export" : `Export ${filtered.length} call${filtered.length !== 1 ? "s" : ""} to CSV`}
+                        className="flex items-center gap-1.5 text-sm h-9 px-3.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         <Download size={14} />
                         <span className="hidden sm:inline">Export</span>

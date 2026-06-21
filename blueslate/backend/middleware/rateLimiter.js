@@ -30,8 +30,10 @@ export const globalLimiter = rateLimit({
 // ── Auth ───────────────────────────────────────────────────────────────────────
 // Tight windows to block credential stuffing and mass registration.
 //
-// Login:    10 req / 15 min per IP
-// Register:  5 req / 1 hr  per IP
+// Login:          10 req / 15 min per IP
+// Register:        5 req / 1 hr  per IP
+// Forgot password: 5 req / 1 hr  per IP  — limits email-bombing and user enumeration
+// Reset password:  5 req / 1 hr  per IP  — limits token brute-forcing
 export const authLoginLimiter = rateLimit({
     ...defaults,
     windowMs: 15 * 60 * 1000,
@@ -39,6 +41,18 @@ export const authLoginLimiter = rateLimit({
 });
 
 export const authRegisterLimiter = rateLimit({
+    ...defaults,
+    windowMs: 60 * 60 * 1000,
+    limit:    5,
+});
+
+export const authForgotPasswordLimiter = rateLimit({
+    ...defaults,
+    windowMs: 60 * 60 * 1000,
+    limit:    5,
+});
+
+export const authResetPasswordLimiter = rateLimit({
     ...defaults,
     windowMs: 60 * 60 * 1000,
     limit:    5,
@@ -118,6 +132,17 @@ export const demoChatLimiter = rateLimit({
 // transition. 300 req / 15 min comfortably handles ~20 concurrent calls
 // (voice + status callback per call) while still blocking rogue traffic.
 export const twilioWebhookLimiter = rateLimit({
+    ...defaults,
+    windowMs: 15 * 60 * 1000,
+    limit:    300,
+});
+
+// ── VAPI webhooks ──────────────────────────────────────────────────────────────
+// Server-to-server from VAPI infrastructure — tool calls + end-of-call reports.
+// A single active call can generate ~1 tool-call request per conversation turn.
+// 300 req / 15 min handles ~15 concurrent active calls with up to 20 turns each.
+// Secret validation (validateVapiSecret) runs after this limiter.
+export const vapiWebhookLimiter = rateLimit({
     ...defaults,
     windowMs: 15 * 60 * 1000,
     limit:    300,

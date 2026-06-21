@@ -101,11 +101,30 @@ model User {
   deletedAt     DateTime? @db.Timestamptz
 
   // Relations
-  memberships     BusinessMember[]
-  invitationsSent Invitation[]     @relation("InvitedByUser")
+  memberships          BusinessMember[]
+  invitationsSent      Invitation[]          @relation("InvitedByUser")
+  passwordResetTokens  PasswordResetToken[]
 
   @@index([role])
   @@map("users")
+}
+
+// ── password_reset_tokens ─────────────────────────────────────────────────────
+// One token per user at a time. Raw token lives only in the email link —
+// only its SHA-256 hash is stored, so a DB leak cannot be used to reset accounts.
+
+model PasswordResetToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  tokenHash String   @unique @db.VarChar(64)
+  expiresAt DateTime @db.Timestamptz
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 // ── businesses ────────────────────────────────────────────────────────────────

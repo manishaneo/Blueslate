@@ -170,6 +170,11 @@ async function _handleGetBusinessInfo(call, query) {
             return "I don't have business information loaded yet. Please call back shortly.";
         }
 
+        const vapiSettings = await prisma.businessSettings.findUnique({
+            where:  { businessId: businessContext.businessId },
+            select: { aiPersonaName: true, tone: true, language: true },
+        });
+
         const { name, email, phone, interest } = extractLeadData(query);
         if (email || phone) {
             const existingByEmail = email ? await findLeadByEmail(email, [businessContext.id]) : null;
@@ -186,7 +191,7 @@ async function _handleGetBusinessInfo(call, query) {
         console.log("[VAPI] Gemini response received");
 
         console.log("[VAPI] Calling generateGroqAnswer...");
-        const answer = await generateGroqAnswer(retrieved, query, businessContext.title ?? "");
+        const answer = await generateGroqAnswer(retrieved, query, businessContext.title ?? "", vapiSettings ?? {});
 
         console.log("[VAPI] Groq response generated");
 

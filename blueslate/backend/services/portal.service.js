@@ -136,7 +136,7 @@ export async function lookupBusiness(websiteInput) {
         where:  { businessId: match.id },
         create: { businessId: match.id },
         update: {},
-        select: { aiPersonaName: true },
+        select: { aiPersonaName: true, greeting: true },
     });
     const receptionistName = settings.aiPersonaName ?? "Virtual Receptionist";
 
@@ -152,6 +152,7 @@ export async function lookupBusiness(websiteInput) {
         businessName:      match.name,
         conversationToken,
         receptionistName,
+        greeting:          settings.greeting ?? null,
         businessData: {
             description:   context.description  || null,
             websiteUrl:    context.websiteUrl   || match.website || null,
@@ -183,10 +184,14 @@ export async function portalChat(conversationToken, question, conversationId, so
         throw new AppError("This business is currently unavailable.", 503);
     }
 
-    // 3. Verify context still exists in DB
-    const businessContext = await prisma.businessContext.findUnique({
-        where: { id: businessContextId },
-    });
+    // 3. Verify context still exists in DB and fetch settings in parallel
+    const [businessContext, bizSettings] = await Promise.all([
+        prisma.businessContext.findUnique({ where: { id: businessContextId } }),
+        prisma.businessSettings.findUnique({
+            where:  { businessId },
+            select: { aiPersonaName: true, tone: true, language: true, greeting: true },
+        }),
+    ]);
     if (!businessContext) {
         throw new AppError("This business is not using Blueslate yet.", 404);
     }
@@ -286,11 +291,16 @@ export async function portalChat(conversationToken, question, conversationId, so
         }
 
         const retrieved = await askGemini(businessContext.content, question);
+        const isFirstMessage = !Array.isArray(conversation?.transcript) || conversation.transcript.length === 0;
+        const portalSettings = isFirstMessage
+            ? (bizSettings ?? {})
+            : { ...(bizSettings ?? {}), greeting: undefined };
         try {
             answer = await generateGroqAnswer(
                 retrieved,
                 question,
-                businessContext.title ?? ""
+                businessContext.title ?? "",
+                portalSettings
             );
         } catch {
             answer = retrieved;
