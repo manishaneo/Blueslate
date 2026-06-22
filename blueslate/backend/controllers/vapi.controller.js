@@ -485,10 +485,21 @@ async function _resolveBusinessContext(call) {
 
     if (metaBusinessId) {
         console.log(`[VAPI] resolving via call metadata: ${metaBusinessId}`);
-        const ctx = await prisma.businessContext.findFirst({
-            where:   { businessId: metaBusinessId },
-            orderBy: { createdAt: "desc" },
-        });
+        let ctx;
+        try {
+            ctx = await prisma.businessContext.findFirst({
+                where:   { businessId: metaBusinessId },
+                orderBy: { createdAt: "desc" },
+            });
+        } catch (err) {
+            console.error("[PROBE-RBC] _resolveBusinessContext primary lookup threw");
+            console.error("[PROBE-RBC] metaBusinessId value :", JSON.stringify(metaBusinessId));
+            console.error("[PROBE-RBC] err.name   :", err?.name);
+            console.error("[PROBE-RBC] err.code   :", err?.code);
+            console.error("[PROBE-RBC] err.meta   :", JSON.stringify(err?.meta));
+            console.error("[PROBE-RBC] err.message:", err?.message);
+            throw err;
+        }
 
         // ── DIAGNOSTIC ────────────────────────────────────────────────────────
         console.log(`[VAPI DEBUG] BusinessContext found: ${!!ctx}`);
