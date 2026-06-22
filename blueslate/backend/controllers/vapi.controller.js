@@ -119,6 +119,19 @@ async function _handleCaptureLead(call, args) {
             return "I've noted your interest and someone from our team will follow up with you soon.";
         }
 
+        // Warn when the lead is about to be saved to a "null-business" context
+        // (demo fallback).  This happens when the VAPI API Request Tool body
+        // template does not include businessId = "{{call.metadata.businessId}}".
+        // The webhook's lead-resolution step will migrate it to the correct
+        // business context once the call ends.
+        if (!businessContext.businessId) {
+            console.warn(
+                "[VAPI] captureLead: business context has no owner businessId — lead will be temporarily " +
+                "saved to the demo context and repaired by the end-of-call webhook. " +
+                "To prevent this, add businessId = \"{{call.metadata.businessId}}\" to the VAPI tool body template."
+            );
+        }
+
         // Dedup: check email first, then phone. Prevents duplicates for callers
         // who share only a phone number (email check alone would miss them).
         const existingByEmail = email ? await findLeadByEmail(email, [businessContext.id]) : null;
@@ -137,7 +150,8 @@ async function _handleCaptureLead(call, args) {
                 interest: interest?.slice(0, 500) ?? null,
                 source:   "vapi",
             });
-            console.log("[VAPI] captureLead: lead saved —", { name, email, phone });
+            console.log("[VAPI] captureLead: lead saved —", { name, email, phone },
+                "| context businessId:", businessContext.businessId ?? "(demo/unowned)");
         }
 
         return "I've noted your interest and someone from our team will be in touch with you soon!";
@@ -361,40 +375,136 @@ export async function handleVapiWebhook(req, res) {
         console.error("[VAPI WEBHOOK] _resolveBusinessContext failed:", err.message);
     }
 
-    // ── Fallback lead extraction from transcript ───────────────────────────────
-    // If the captureLead tool was called during the conversation the lead is already
-    // saved. This pass runs regardless — dedup by email OR phone guards against
-    // duplicates, so it is safe to run both paths.
+    // ── Lead resolution: tool-call args → transcript fallback → outbound phone ──
+    //
+    // Three-pass approach to reliably associate the correct lead with this call:
+    //
+    // Pass 1 — Scan messages for a captureLead tool_calls turn.  VAPI fires this
+    //   with structured args (name, email, phone, interest) during the call.  This
+    //   is more reliable than text scanning because it does not depend on spoken
+    //   contact info appearing in the transcript verbatim.
+    //
+    // Pass 2 — Run extractLeadData over the transcript text as a fallback.
+    //
+    // Pass 3 — For outbound calls the customer's phone is always known (callerPhone).
+    //   Use it as a guaranteed phone signal when neither of the above yielded one.
+    //
+    // After collecting (name, email, phone, interest), the dedup/migration logic:
+    //   a) Look in the correct business context — use if found.
+    //   b) Look globally — if found in a null-businessId context (demo fallback),
+    //      migrate the lead to the correct context.  This repairs leads that were
+    //      incorrectly created in the demo context when the VAPI API Request Tool
+    //      body template did not forward call.metadata.businessId.
+    //   c) Create a new lead in the correct context if none found anywhere.
     let capturedLeadId = null;
-    if (transcriptText) {
+    if (webhookBusinessContext) {
         try {
-            const { name, email, phone } = extractLeadData(transcriptText);
-            if (email || phone) {
-                if (webhookBusinessContext) {
-                    // Check email first, then fall back to phone for phone-only callers.
-                    const existingByEmail = email ? await findLeadByEmail(email, [webhookBusinessContext.id]) : null;
-                    const existingByPhone = (!existingByEmail && phone) ? await findLeadByPhone(phone, [webhookBusinessContext.id]) : null;
-                    const existing = existingByEmail ?? existingByPhone;
+            // Pass 1: captureLead tool_calls in the VAPI messages array.
+            // VAPI uses "toolCalls" in end-of-call-report messages; some versions
+            // use "toolCallList" — handle both.
+            let toolName = null, toolEmail = null, toolPhone = null, toolInterest = null;
+            for (const m of (messages ?? [])) {
+                const tcs = m.toolCalls ?? m.toolCallList ?? [];
+                if (Array.isArray(tcs)) {
+                    for (const tc of tcs) {
+                        if (tc.function?.name === "captureLead") {
+                            try {
+                                const args = typeof tc.function.arguments === "string"
+                                    ? JSON.parse(tc.function.arguments)
+                                    : (tc.function.arguments ?? {});
+                                if (args.email || args.phone) {
+                                    toolName     = args.name     ?? null;
+                                    toolEmail    = args.email    ?? null;
+                                    toolPhone    = args.phone    ?? null;
+                                    toolInterest = args.interest ?? null;
+                                }
+                            } catch { /* malformed args — skip */ }
+                        }
+                    }
+                }
+            }
 
-                    if (!existing) {
+            // Pass 2: transcript text extraction (fallback when tool call data absent)
+            const { name: txName, email: txEmail, phone: txPhone } =
+                transcriptText ? extractLeadData(transcriptText) : {};
+
+            // Merge: tool-call args win over transcript extraction
+            let name     = toolName     ?? txName  ?? null;
+            let email    = toolEmail    ?? txEmail  ?? null;
+            let phone    = toolPhone    ?? txPhone  ?? null;
+            let interest = toolInterest ?? null;
+
+            // Pass 3: outbound phone as guaranteed phone signal
+            const outboundPhone = (direction === "outbound" && callerPhone !== "unknown")
+                ? callerPhone
+                : null;
+            if (!phone && outboundPhone) {
+                phone = outboundPhone;
+            }
+
+            if (email || phone) {
+                // (a) Check in the correct business context first
+                const existingByEmail = email ? await findLeadByEmail(email, [webhookBusinessContext.id]) : null;
+                const existingByPhone = (!existingByEmail && phone)
+                    ? await findLeadByPhone(phone, [webhookBusinessContext.id])
+                    : null;
+                const existingInCorrect = existingByEmail ?? existingByPhone;
+
+                if (existingInCorrect) {
+                    capturedLeadId = existingInCorrect.id;
+                    console.log("[VAPI WEBHOOK] lead already in correct context:", email ?? phone);
+                } else {
+                    // (b) Global search — look for a lead created in the wrong context.
+                    // This handles the case where _resolveBusinessContext fell back to
+                    // the demo context during the call because the VAPI API Request Tool
+                    // body template did not include businessId = "{{call.metadata.businessId}}".
+                    const globalByEmail = email ? await findLeadByEmail(email, null) : null;
+                    const globalByPhone = (!globalByEmail && phone)
+                        ? await findLeadByPhone(phone, null)
+                        : null;
+                    const existingAnywhere = globalByEmail ?? globalByPhone;
+
+                    if (existingAnywhere) {
+                        const existingCtx = await prisma.businessContext.findUnique({
+                            where:  { id: existingAnywhere.businessContextId },
+                            select: { businessId: true },
+                        });
+
+                        if (!existingCtx?.businessId) {
+                            // Lead is in a context with no business owner (demo fallback) — migrate.
+                            console.log("[VAPI WEBHOOK] migrating misrouted lead from demo context →",
+                                webhookBusinessContext.id, "| id:", existingAnywhere.id);
+                            await prisma.lead.update({
+                                where: { id: existingAnywhere.id },
+                                data:  { businessContextId: webhookBusinessContext.id },
+                            });
+                            capturedLeadId = existingAnywhere.id;
+                        } else {
+                            // Lead belongs to a different real business — leave it alone.
+                            capturedLeadId = existingAnywhere.id;
+                            console.log("[VAPI WEBHOOK] lead found in another business context — not migrating:", email ?? phone);
+                        }
+                    } else {
+                        // (c) No lead found anywhere — create one in the correct context.
+                        const interestStr = interest
+                            ?? (outboundPhone === phone
+                                ? `Outbound ${callType} call`
+                                : `Captured from ${callType} call transcript`);
                         const lead = await createLead({
                             businessContextId: webhookBusinessContext.id,
-                            name:     name  ?? null,
+                            name,
                             email:    email ?? null,
                             phone:    phone ?? null,
-                            interest: `Captured from ${callType} call transcript`,
+                            interest: interestStr,
                             source:   "vapi",
                         });
                         capturedLeadId = lead?.id ?? null;
-                        console.log("[VAPI WEBHOOK] transcript lead saved:", { name, email, phone });
-                    } else {
-                        capturedLeadId = existing.id ?? null;
-                        console.log("[VAPI WEBHOOK] transcript lead already exists — skipping:", email ?? phone);
+                        console.log("[VAPI WEBHOOK] new lead created:", { name, email, phone });
                     }
                 }
             }
         } catch (err) {
-            console.error("[VAPI WEBHOOK] transcript lead extraction failed:", err.message);
+            console.error("[VAPI WEBHOOK] lead resolution failed:", err.message);
         }
     }
 
