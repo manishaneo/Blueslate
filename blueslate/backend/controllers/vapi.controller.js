@@ -19,6 +19,7 @@ import { createLead, findLeadByEmail, findLeadByPhone } from "../services/lead.s
  *     Response: { results: [{ toolCallId, result }] }
  */
 export async function handleVapiToolCall(req, res) {
+    console.log("[PROBE-1] handleVapiToolCall entered — POST /api/vapi/tool reached");
     // Log raw body FIRST — before any conditional — so we always see what VAPI sends
     console.log("[VAPI] ===== INCOMING REQUEST =====");
     console.log("[VAPI] Body:", JSON.stringify(req.body, null, 2));
@@ -26,10 +27,12 @@ export async function handleVapiToolCall(req, res) {
 
     // Detect which VAPI tool format was used
     if (req.body?.message?.type === "tool-calls") {
+        console.log("[PROBE-2] routing to _handleWebhookFormat (Server URL / Function Tool)");
         return _handleWebhookFormat(req, res);
     }
 
     // VAPI API Request Tool — parameters arrive at root level
+    console.log("[PROBE-2] routing to _handleApiRequestFormat (API Request Tool)");
     return _handleApiRequestFormat(req, res);
 }
 
@@ -48,7 +51,9 @@ async function _handleApiRequestFormat(req, res) {
     // Discriminate by which parameters are present.
     // captureLead sends { name?, email?, phone?, interest? } — no "query" key.
     if (req.body?.query !== undefined) {
+        console.log("[PROBE-2A] _handleApiRequestFormat — dispatching getBusinessInfo, query:", req.body.query);
         const result = await _handleGetBusinessInfo(call, req.body.query);
+        console.log("[PROBE-8] _handleApiRequestFormat — sending response:", result);
         console.log("[VAPI] getBusinessInfo result:", result);
         return res.json({ result });
     }
@@ -80,7 +85,9 @@ async function _handleWebhookFormat(req, res) {
         }
 
         if (fnName === "getBusinessInfo") {
+            console.log("[PROBE-2B] _handleWebhookFormat — dispatching getBusinessInfo, query:", args.query);
             const result = await _handleGetBusinessInfo(message.call, args.query);
+            console.log("[PROBE-8] _handleWebhookFormat — getBusinessInfo result:", result);
             results.push({ toolCallId, result });
         } else if (fnName === "captureLead") {
             const result = await _handleCaptureLead(message.call, args);
@@ -142,6 +149,7 @@ async function _handleCaptureLead(call, args) {
 }
 
 async function _handleGetBusinessInfo(call, query) {
+    console.log("[PROBE-3] _handleGetBusinessInfo entered — query:", query);
     console.log("[DEBUG] getBusinessInfo call =", JSON.stringify(call, null, 2));
     console.log("[VAPI] Query:", query);
 
@@ -191,7 +199,9 @@ async function _handleGetBusinessInfo(call, query) {
         // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
         console.log("[VAPI DEBUG] calling askGemini with query:", query);
         // ── END DIAGNOSTIC ────────────────────────────────────────────────────────
+        console.log("[PROBE-4] about to call askGemini");
         const retrieved = await askGemini(businessContext.content, query);
+        console.log("[PROBE-5] askGemini returned — length:", retrieved?.length, "| value:", JSON.stringify(retrieved));
 
         // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
         console.log("[VAPI DEBUG] askGemini returned          :", JSON.stringify(retrieved));
@@ -203,7 +213,9 @@ async function _handleGetBusinessInfo(call, query) {
         console.log("[VAPI DEBUG] calling generateGroqAnswer — businessName:", businessContext.title ?? "");
         console.log("[VAPI DEBUG] vapiSettings                :", JSON.stringify(vapiSettings));
         // ── END DIAGNOSTIC ────────────────────────────────────────────────────────
+        console.log("[PROBE-6] about to call generateGroqAnswer — GROQ_API_KEY set:", !!process.env.GROQ_API_KEY);
         const answer = await generateGroqAnswer(retrieved, query, businessContext.title ?? "", vapiSettings ?? {});
+        console.log("[PROBE-7] generateGroqAnswer returned — answer:", JSON.stringify(answer));
 
         // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
         console.log("[VAPI DEBUG] generateGroqAnswer returned :", JSON.stringify(answer));
@@ -211,6 +223,7 @@ async function _handleGetBusinessInfo(call, query) {
 
         return answer;
     } catch (err) {
+        console.error("[PROBE-CATCH] catch block entered — err.name:", err?.name, "| err.message:", err?.message);
         console.error("[VAPI FULL ERROR] ── _handleGetBusinessInfo caught an exception ──");
         console.error("[VAPI FULL ERROR] err.name   :", err?.name);
         console.error("[VAPI FULL ERROR] err.message:", err?.message);
