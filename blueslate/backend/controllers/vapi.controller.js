@@ -151,17 +151,14 @@ async function _handleGetBusinessInfo(call, query) {
 
     try {
         const businessContext = await _resolveBusinessContext(call);
-        console.log("[DEBUG] businessContext.id =", businessContext?.id);
-        console.log("[DEBUG] businessContext.businessId =", businessContext?.businessId);
-        console.log("[DEBUG] businessContext.title =", businessContext?.title);
-        console.log("[DEBUG] content preview =", businessContext?.content?.slice(0, 300));
-
-        console.log("[VAPI] Business found:", !!businessContext);
-        console.log("[VAPI] Business title:", businessContext?.title);
-        console.log("[VAPI] Content length:", businessContext?.content?.length);
-        console.log("[VAPI] businessContext.id        :", businessContext?.id);
-        console.log("[VAPI] businessContext.businessId :", businessContext?.businessId);
-        console.log("[VAPI] content[0:300]             :", businessContext?.content?.slice(0, 300));
+        // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
+        console.log("[VAPI DEBUG] businessContext.id        :", businessContext?.id);
+        console.log("[VAPI DEBUG] businessContext.businessId :", businessContext?.businessId);
+        console.log("[VAPI DEBUG] businessContext.title      :", businessContext?.title);
+        console.log("[VAPI DEBUG] content populated          :", !!businessContext?.content);
+        console.log("[VAPI DEBUG] content length (chars)     :", businessContext?.content?.length ?? 0);
+        console.log("[VAPI DEBUG] content first 500 chars    :", businessContext?.content?.slice(0, 500).replace(/\n/g, " ") ?? "(null)");
+        // ── END DIAGNOSTIC ────────────────────────────────────────────────────────
 
         if (!businessContext) {
             return "I don't have information about this business.";
@@ -185,15 +182,26 @@ async function _handleGetBusinessInfo(call, query) {
             }
         }
 
-        console.log("[VAPI] Calling askGemini...");
+        // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
+        console.log("[VAPI DEBUG] calling askGemini with query:", query);
+        // ── END DIAGNOSTIC ────────────────────────────────────────────────────────
         const retrieved = await askGemini(businessContext.content, query);
 
-        console.log("[VAPI] Gemini response received");
+        // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
+        console.log("[VAPI DEBUG] askGemini returned          :", JSON.stringify(retrieved));
+        console.log("[VAPI DEBUG] retrieved is fallback string:", retrieved === "I don't have that information available.");
+        console.log("[VAPI DEBUG] retrieved length (chars)    :", retrieved?.length ?? 0);
+        // ── END DIAGNOSTIC ────────────────────────────────────────────────────────
 
-        console.log("[VAPI] Calling generateGroqAnswer...");
+        // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
+        console.log("[VAPI DEBUG] calling generateGroqAnswer — businessName:", businessContext.title ?? "");
+        console.log("[VAPI DEBUG] vapiSettings                :", JSON.stringify(vapiSettings));
+        // ── END DIAGNOSTIC ────────────────────────────────────────────────────────
         const answer = await generateGroqAnswer(retrieved, query, businessContext.title ?? "", vapiSettings ?? {});
 
-        console.log("[VAPI] Groq response generated");
+        // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
+        console.log("[VAPI DEBUG] generateGroqAnswer returned :", JSON.stringify(answer));
+        // ── END DIAGNOSTIC ────────────────────────────────────────────────────────
 
         return answer;
     } catch (err) {
