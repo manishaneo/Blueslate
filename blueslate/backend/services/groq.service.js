@@ -85,15 +85,31 @@ export const generateGroqAnswer = async (context, question, businessName = "", s
     console.log("[DEBUG] GROQ context:", context);
     console.log("[DEBUG] GROQ question:", question);
 
-    const completion = await getClient().chat.completions.create({
-        model: MODEL,
-        messages: [
-            { role: "system", content: buildSystemPrompt(businessName, settings) },
-            { role: "user",   content: `Context:\n${context}\n\nQuestion: ${question}` },
-        ],
-        max_tokens: 120,
-        temperature: 0.4,
-    });
+    // Fail fast with a clear log if the API key is absent — prevents the SDK from
+    // making an unauthenticated request that always throws AuthenticationError.
+    if (!process.env.GROQ_API_KEY) {
+        console.error("[GROQ] GROQ_API_KEY is not set — cannot call Groq API");
+        return "I don't have that information handy, but I'd be happy to have someone from our team follow up with you.";
+    }
+
+    let completion;
+    try {
+        completion = await getClient().chat.completions.create({
+            model: MODEL,
+            messages: [
+                { role: "system", content: buildSystemPrompt(businessName, settings) },
+                { role: "user",   content: `Context:\n${context}\n\nQuestion: ${question}` },
+            ],
+            max_tokens: 120,
+            temperature: 0.4,
+        });
+    } catch (err) {
+        console.error("[GROQ] chat.completions.create failed");
+        console.error("[GROQ] err.name   :", err?.name);
+        console.error("[GROQ] err.message:", err?.message);
+        console.error("[GROQ] err.status :", err?.status);
+        return "I don't have that information handy, but I'd be happy to have someone from our team follow up with you.";
+    }
 
     return (
         completion.choices[0]?.message?.content?.trim() ||
