@@ -478,12 +478,13 @@ async function _resolveBusinessContext(call) {
     //    Requires the VAPI assistant tool to be configured as a Server URL / Function tool
     //    (not API Request Tool) so that VAPI forwards the full call object including metadata.
     const metaBusinessId = call?.metadata?.businessId;
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-    // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
-    console.log(`[VAPI DEBUG] metaBusinessId: ${metaBusinessId ?? "(none — call.metadata.businessId not present)"}`);
-    // ── END DIAGNOSTIC ────────────────────────────────────────────────────────
+    if (metaBusinessId && !UUID_RE.test(metaBusinessId)) {
+        console.warn(`[VAPI] skipping call.metadata.businessId — not a valid UUID: ${JSON.stringify(metaBusinessId)}`);
+    }
 
-    if (metaBusinessId) {
+    if (metaBusinessId && UUID_RE.test(metaBusinessId)) {
         console.log(`[VAPI] resolving via call metadata: ${metaBusinessId}`);
         let ctx;
         try {
@@ -492,13 +493,7 @@ async function _resolveBusinessContext(call) {
                 orderBy: { createdAt: "desc" },
             });
         } catch (err) {
-            console.error("[PROBE-RBC] _resolveBusinessContext primary lookup threw");
-            console.error("[PROBE-RBC] metaBusinessId value :", JSON.stringify(metaBusinessId));
-            console.error("[PROBE-RBC] err.name   :", err?.name);
-            console.error("[PROBE-RBC] err.code   :", err?.code);
-            console.error("[PROBE-RBC] err.meta   :", JSON.stringify(err?.meta));
-            console.error("[PROBE-RBC] err.message:", err?.message);
-            throw err;
+            console.warn(`[VAPI] WARNING: call metadata businessId lookup failed: ${err.message}`);
         }
 
         // ── DIAGNOSTIC ────────────────────────────────────────────────────────
@@ -532,7 +527,6 @@ async function _resolveBusinessContext(call) {
     //    business UUID in .env to pin dashboard test calls to a specific business.
     //    Rejected if not a valid UUID: prevents placeholder values from hitting the DB.
     const testBusinessId = process.env.VAPI_TEST_BUSINESS_ID;
-    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
     // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
     console.log(`[VAPI DEBUG] Used fallback VAPI_TEST_BUSINESS_ID: ${!!(testBusinessId && UUID_RE.test(testBusinessId))}`);
