@@ -514,6 +514,28 @@ async function _resolveBusinessContext(call) {
         }
     }
 
+    // 3. Inbound demo-number fallback — XP League demo context was seeded with
+    //    businessId = null (see demo.controller.js:handleDemoSeed), so UUID-based
+    //    lookups above always miss it. Find it the same way handleDemoInfo does:
+    //    by websiteUrl substring. Only runs when both UUID paths have already failed,
+    //    so it never interferes with multi-tenant or outbound portal calls.
+    try {
+        const ctx = await prisma.businessContext.findFirst({
+            where: {
+                websiteUrl: { contains: "xpleague.com" },
+                content:    { not: null },
+                AND:        { content: { not: "" } },
+            },
+            orderBy: { createdAt: "desc" },
+        });
+        if (ctx) {
+            console.log(`[VAPI] resolved via demo fallback (xpleague.com) — id: ${ctx.id}`);
+            return ctx;
+        }
+    } catch (err) {
+        console.warn("[VAPI] demo fallback query failed:", err.message);
+    }
+
     // No context resolved — callers handle null:
     //   _handleGetBusinessInfo  → returns "I don't have business information loaded yet."
     //   _handleCaptureLead      → returns a warm hold message, skips DB write
