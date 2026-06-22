@@ -38,13 +38,14 @@ export async function handleDemoInfo(req, res) {
     // Calls are independent of BusinessContext — always fetch them.
     const [rawCalls, activeCallCount] = await Promise.all([
         prisma.call.findMany({
+            where:   { direction: "inbound" },
             orderBy: { startedAt: "desc" },
             take:    10,
             select:  { id: true, from: true, duration: true, status: true, startedAt: true, endedAt: true, transcript: true },
         }).catch(() => []),
 
         prisma.call.count({
-            where: { status: { in: ACTIVE_STATUSES } },
+            where: { status: { in: ACTIVE_STATUSES }, direction: "inbound" },
         }).catch(() => 0),
     ]);
 

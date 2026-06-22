@@ -7,7 +7,8 @@
     "dev": "nodemon server.js",
     "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "seed:admin": "node scripts/create-app-admin.js"
+    "seed:admin": "node scripts/create-app-admin.js",
+    "migrate:fix-phone-links": "node scripts/fix-phone-conversation-links.js"
   },
   "keywords": [],
   "author": "",

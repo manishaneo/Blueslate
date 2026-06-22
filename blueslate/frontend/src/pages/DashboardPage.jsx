@@ -335,7 +335,7 @@ export default function DashboardPage() {
                                                             )}
                                                             {lead.email && (
                                                                 <button
-                                                                    onClick={() => { window.location.href = `mailto:${lead.email}`; }}
+                                                                    onClick={() => { window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(lead.email)}`, "_blank", "noopener,noreferrer"); }}
                                                                     title={`Email ${lead.email}`}
                                                                     className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 hover:text-blue-600 dark:hover:text-blue-400 transition-all"
                                                                 >

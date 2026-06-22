@@ -70,9 +70,10 @@ export async function updateSettings(userId, activeBusinessId, body) {
         throw new AppError("No valid fields provided for update.", 400);
     }
 
-    const updated = await prisma.businessSettings.update({
+    const updated = await prisma.businessSettings.upsert({
         where:  { businessId },
-        data,
+        update: data,
+        create: { businessId, ...data },
         select: { aiPersonaName: true, tone: true, language: true, greeting: true },
     });
 

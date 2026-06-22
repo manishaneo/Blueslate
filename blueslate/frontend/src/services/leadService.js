@@ -14,3 +14,13 @@ export const updateLeadStatus = async (id, status) => {
     const response = await api.patch(`/leads/${id}/status`, { status });
     return response.data;
 };
+
+export const getLeadConversations = async (id) => {
+    const response = await api.get(`/leads/${id}/conversations`);
+    return response.data;
+};
+
+export const exportLeadsCSV = async () => {
+    const response = await api.get("/leads/export", { responseType: "blob" });
+    return response.data;
+};

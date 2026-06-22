@@ -405,7 +405,9 @@ function ConversationDrawer({ conversationId, onClose }) {
                                             <div>
                                                 <p className="text-xs text-gray-400 dark:text-gray-500">Email</p>
                                                 <a
-                                                    href={`mailto:${data.lead.email}`}
+                                                    href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(data.lead.email)}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
                                                     className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 mt-0.5 break-all"
                                                 >
                                                     <Mail size={11} className="shrink-0" />

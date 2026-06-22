@@ -2,6 +2,19 @@ import prisma from "../prismaClient.js";
 import { resolveActiveBusiness } from "../utils/resolveActiveBusiness.js";
 import { AppError }              from "../middleware/AppError.js";
 
+// Strips known country-code prefixes (+91 India, +1 US/CA) so that
+// "+917205672015" and "7205672015" both resolve to the same 10-digit form.
+// Returns the original string unchanged when the format is not recognised,
+// so callers never silently mangle unusual numbers.
+function normalizePhone(phone) {
+    if (!phone) return phone;
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
+    if (digits.length === 11 && digits.startsWith("1"))  return digits.slice(1);
+    if (digits.length === 10) return digits;
+    return phone;
+}
+
 /**
  * Resolve the Phase-1 BusinessContext IDs for the active business.
  *
@@ -26,9 +39,12 @@ async function resolveContextIds(userId, activeBusinessId) {
 // Internal use only — caller must supply a server-resolved businessContextId.
 // Used by chat.service, which already resolves the context before calling this.
 export const createLead = async (data) => {
-    console.log("[portal-debug] createLead called | payload:", JSON.stringify(data));
+    const normalized = data.phone
+        ? { ...data, phone: normalizePhone(data.phone) }
+        : data;
+    console.log("[portal-debug] createLead called | payload:", JSON.stringify(normalized));
     try {
-        const result = await prisma.lead.create({ data });
+        const result = await prisma.lead.create({ data: normalized });
         console.log("[portal-debug] createLead succeeded | id:", result.id);
         return result;
     } catch (err) {
@@ -66,12 +82,12 @@ export const createLeadForActiveContext = async (userId, activeBusinessId, leadD
     return prisma.lead.create({
         data: {
             businessContextId: context.id,
-            name:     leadData.name     ?? null,
-            email:    leadData.email    ?? null,
-            phone:    leadData.phone    ?? null,
-            interest: leadData.interest ?? null,
-            notes:    leadData.notes    ?? null,
-            source:   leadData.source   ?? null,
+            name:     leadData.name                             ?? null,
+            email:    leadData.email                            ?? null,
+            phone:    normalizePhone(leadData.phone)            ?? null,
+            interest: leadData.interest                         ?? null,
+            notes:    leadData.notes                            ?? null,
+            source:   leadData.source                           ?? null,
         },
     });
 };
@@ -104,13 +120,34 @@ export const findLeadByEmail = async (email, contextIds = null) => {
  */
 export const findLeadByPhone = async (phone, contextIds = null) => {
     if (contextIds !== null && contextIds.length === 0) return null;
+    if (!phone) return null;
 
-    const where = { phone };
+    // Search by both the raw value and its normalised form so that
+    // "+917205672015" matches a lead stored as "7205672015" and vice-versa.
+    const canonical = normalizePhone(phone);
+    const variants  = [...new Set([phone, canonical])];
+
+    const where = {
+        phone: variants.length > 1 ? { in: variants } : variants[0],
+    };
     if (contextIds !== null) {
         where.businessContextId = { in: contextIds };
     }
 
     return prisma.lead.findFirst({ where });
+};
+
+/**
+ * Return a single lead by ID, verifying it belongs to the active business.
+ * Returns null when the lead doesn't exist or belongs to a different business.
+ */
+export const getLead = async (id, userId, activeBusinessId) => {
+    const contextIds = await resolveContextIds(userId, activeBusinessId);
+    if (contextIds.length === 0) return null;
+
+    return prisma.lead.findFirst({
+        where: { id, businessContextId: { in: contextIds } },
+    });
 };
 
 /**
@@ -151,5 +188,38 @@ export const updateLeadStatus = async (id, status, userId, activeBusinessId) => 
     return prisma.lead.update({
         where: { id },
         data:  { status },
+    });
+};
+
+/**
+ * Return all conversations linked to a lead, verifying business ownership first.
+ * Throws a P2025-coded error if the lead doesn't exist or belongs to another business.
+ */
+export const getLeadConversations = async (leadId, userId, activeBusinessId) => {
+    const contextIds = await resolveContextIds(userId, activeBusinessId);
+    if (contextIds.length === 0) return [];
+
+    const owned = await prisma.lead.findFirst({
+        where:  { id: leadId, businessContextId: { in: contextIds } },
+        select: { id: true },
+    });
+    if (!owned) {
+        const err = new Error("Lead not found.");
+        err.code = "P2025";
+        throw err;
+    }
+
+    return prisma.conversation.findMany({
+        where:   { leadId },
+        orderBy: { createdAt: "desc" },
+        select: {
+            id:         true,
+            source:     true,
+            summary:    true,
+            transcript: true,
+            metadata:   true,
+            leadId:     true,
+            createdAt:  true,
+        },
     });
 };

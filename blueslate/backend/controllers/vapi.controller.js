@@ -1,6 +1,6 @@
 import prisma from "../prismaClient.js";
 import { askGemini } from "../services/ai.service.js";
-import { generateGroqAnswer } from "../services/groq.service.js";
+import { generateGroqAnswer, generateConversationSummary } from "../services/groq.service.js";
 import { extractLeadData }             from "../services/leadExtraction.service.js";
 import { createLead, findLeadByEmail, findLeadByPhone } from "../services/lead.service.js";
 
@@ -551,7 +551,7 @@ export async function handleVapiWebhook(req, res) {
                             : startedAtSec,
                     }));
 
-                await prisma.conversation.create({
+                const conv = await prisma.conversation.create({
                     data: {
                         businessId:        businessContext.businessId,
                         businessContextId: businessContext.id,
@@ -569,6 +569,19 @@ export async function handleVapiWebhook(req, res) {
                     },
                 });
                 console.log("[VAPI WEBHOOK] conversations row created for call:", vapiCallId);
+
+                // Fire-and-forget summary — same pattern as chat.service.js and portal.service.js.
+                // Does not block the 200 response; failures are silently swallowed.
+                generateConversationSummary(transcript, businessContext.title ?? "")
+                    .then((summary) => {
+                        if (summary) {
+                            return prisma.conversation.update({
+                                where: { id: conv.id },
+                                data:  { summary },
+                            });
+                        }
+                    })
+                    .catch(() => {});
                 } // end conversationTurns.length > 0
             }
         } else {

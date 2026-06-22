@@ -76,6 +76,13 @@ function callLead(call) {
     return call.metadata?.lead ?? call.lead ?? null;
 }
 
+function callDirection(call) {
+    const t = call.metadata?.callType;
+    if (t === "outboundPhoneCall") return "outbound";
+    if (t === "inboundPhoneCall" || t === "webCall") return "inbound";
+    return null;
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function formatDate(dateStr) {
@@ -173,6 +180,20 @@ function OutcomeBadge({ outcome }) {
     );
 }
 
+function CallDirectionBadge({ direction }) {
+    if (!direction) return null;
+    const isOut = direction === "outbound";
+    return (
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${
+            isOut
+                ? "bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-400"
+                : "bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-400"
+        }`}>
+            {isOut ? "↗" : "↙"} {isOut ? "Outbound" : "Inbound"}
+        </span>
+    );
+}
+
 function FilterDropdown({ value, onChange, options }) {
     return (
         <div className="relative">
@@ -219,9 +240,16 @@ function TranscriptDrawer({ call, visible, onClose }) {
                         <div>
                             <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Call Transcript</h2>
                             {call && (
-                                <p className="text-xs text-gray-400 dark:text-gray-500">
-                                    {formatDate(callStartedAt(call))} · {formatDuration(callDuration(call))}
-                                </p>
+                                <div>
+                                    <p className="text-xs text-gray-400 dark:text-gray-500">
+                                        {formatDate(callStartedAt(call))} · {formatDuration(callDuration(call))}
+                                    </p>
+                                    {callDirection(call) && (
+                                        <div className="mt-1">
+                                            <CallDirectionBadge direction={callDirection(call)} />
+                                        </div>
+                                    )}
+                                </div>
                             )}
                         </div>
                     </div>
@@ -238,13 +266,8 @@ function TranscriptDrawer({ call, visible, onClose }) {
 
                         <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
                             <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3">
-                                Call Summary
+                                Call Details
                             </p>
-                            {call.summary && (
-                                <p className="text-sm text-gray-600 dark:text-gray-400 italic mb-3 leading-relaxed">
-                                    "{call.summary}"
-                                </p>
-                            )}
                             <div className="grid grid-cols-2 gap-3">
                                 {[
                                     { label: "Duration",    value: formatDuration(callDuration(call)) },
@@ -264,6 +287,20 @@ function TranscriptDrawer({ call, visible, onClose }) {
                             </div>
                             <div className="mt-3">
                                 <OutcomeBadge outcome={callOutcome(call)} />
+                            </div>
+                            <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+                                <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2">
+                                    AI Summary
+                                </p>
+                                {call.summary ? (
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 italic leading-relaxed">
+                                        "{call.summary}"
+                                    </p>
+                                ) : (
+                                    <p className="text-xs text-gray-400 dark:text-gray-500 italic">
+                                        AI summary not available.
+                                    </p>
+                                )}
                             </div>
                         </div>
 
@@ -589,8 +626,9 @@ export default function CallHistoryPage() {
                                             key={call.id}
                                             className="hover:bg-blue-50/30 dark:hover:bg-blue-900/10 transition-colors group"
                                         >
-                                            <td className="px-5 py-3.5 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
-                                                {formatDate(callStartedAt(call))}
+                                            <td className="px-5 py-3.5 whitespace-nowrap">
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">{formatDate(callStartedAt(call))}</p>
+                                                <CallDirectionBadge direction={callDirection(call)} />
                                             </td>
 
                                             <td className="px-5 py-3.5">

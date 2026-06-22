@@ -1,8 +1,15 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, Copy, Check } from "lucide-react";
-import { getLeads, getDashboardStats, updateLeadStatus } from "../services/leadService";
-import { API_BASE_URL } from "../utils/api";
+import { Mail, Phone } from "lucide-react";
+import { getLeads, getDashboardStats, exportLeadsCSV } from "../services/leadService";
+
+function sanitizePhone(phone) {
+    if (!phone) return null;
+    const trimmed = phone.trim();
+    const hasPlus = trimmed.startsWith("+");
+    const digits = trimmed.replace(/\D/g, "");
+    return digits ? (hasPlus ? `+${digits}` : digits) : null;
+}
 
 // ── stat card definitions ────────────────────────────────────────────────────
 
@@ -123,40 +130,6 @@ function StatusBadge({ status }) {
     );
 }
 
-const STATUS_OPTIONS = ["NEW", "CONTACTED", "CONVERTED"];
-
-function StatusDropdown({ lead, onUpdate, isUpdating }) {
-    if (isUpdating) {
-        return (
-            <span className="inline-flex items-center gap-1.5">
-                <svg className="w-3 h-3 animate-spin text-gray-400 dark:text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
-                </svg>
-                <StatusBadge status={lead.status} />
-            </span>
-        );
-    }
-
-    return (
-        <div className="relative inline-flex" onClick={(e) => e.stopPropagation()}>
-            <select
-                value={lead.status ?? "NEW"}
-                onChange={(e) => onUpdate(lead.id, e.target.value)}
-                className={`appearance-none text-xs font-medium pl-2.5 pr-6 py-0.5 rounded-full border-0 cursor-pointer outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-0 transition-colors ${STATUS_STYLES[lead.status] ?? "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400"}`}
-            >
-                {STATUS_OPTIONS.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                ))}
-            </select>
-            <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center">
-                <svg className="w-2.5 h-2.5 opacity-60" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                </svg>
-            </span>
-        </div>
-    );
-}
 
 // ── lead modal ────────────────────────────────────────────────────────────────
 
@@ -215,7 +188,7 @@ function LeadModal({ lead, onClose }) {
                     {field("Created At", new Date(lead.createdAt).toLocaleString())}
                     {lead.email && (
                         <button
-                            onClick={() => { window.location.href = `mailto:${lead.email}`; }}
+                            onClick={() => { window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(lead.email)}`, "_blank", "noopener,noreferrer"); }}
                             className="flex items-center gap-2 text-sm px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors w-full justify-center"
                         >
                             <Mail size={15} />
@@ -236,32 +209,27 @@ export default function LeadsPage() {
     const [stats, setStats]       = useState(null);
     const [loading, setLoading]   = useState(true);
     const [error, setError]       = useState(null);
-    const [search, setSearch]     = useState("");
+    const [search, setSearch]         = useState("");
     const [selectedLead, setSelectedLead] = useState(null);
-    const [updatingIds, setUpdatingIds]   = useState(new Set());
-    const [copiedId, setCopiedId] = useState(null);
+    const [exporting, setExporting]   = useState(false);
 
-    const handleStatusUpdate = async (id, newStatus) => {
-        const snapshot = leads;
-        setLeads((prev) => prev.map((l) => l.id === id ? { ...l, status: newStatus } : l));
-        setUpdatingIds((prev) => new Set([...prev, id]));
+    const handleExportCSV = async () => {
+        if (exporting) return;
+        setExporting(true);
         try {
-            await updateLeadStatus(id, newStatus);
+            const blob = await exportLeadsCSV();
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement("a");
+            a.href     = url;
+            a.download = "leads.csv";
+            a.click();
+            URL.revokeObjectURL(url);
         } catch {
-            setLeads(snapshot);
+            // silently ignore — network/auth errors are surfaced by the axios interceptor
         } finally {
-            setUpdatingIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+            setExporting(false);
         }
     };
-
-    const handleCopyPhone = (id, phone) => {
-        if (!phone) return;
-        navigator.clipboard.writeText(phone).then(() => {
-            setCopiedId(id);
-            setTimeout(() => setCopiedId(null), 2000);
-        });
-    };
-
     useEffect(() => {
         Promise.all([getLeads(), getDashboardStats()])
             .then(([leadsRes, statsRes]) => {
@@ -298,17 +266,17 @@ export default function LeadsPage() {
                     <h1 className="text-xl font-bold text-gray-900 dark:text-white">Leads</h1>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">All captured contacts</p>
                 </div>
-                <a
-                    href={`${API_BASE_URL}/leads/export`}
-                    download="leads.csv"
-                    className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 font-medium transition-colors shadow-sm"
+                <button
+                    onClick={handleExportCSV}
+                    disabled={exporting}
+                    className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-gray-400 dark:text-gray-500">
                         <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
                         <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
                     </svg>
-                    Export CSV
-                </a>
+                    {exporting ? "Exporting…" : "Export CSV"}
+                </button>
             </div>
 
             {/* Loading */}
@@ -437,33 +405,33 @@ export default function LeadsPage() {
                                                     <span className="block truncate text-gray-500 dark:text-gray-400 text-xs">{lead.interest ?? "—"}</span>
                                                 </td>
                                                 <td className="px-5 py-3.5">
-                                                    <StatusDropdown
-                                                        lead={lead}
-                                                        onUpdate={handleStatusUpdate}
-                                                        isUpdating={updatingIds.has(lead.id)}
-                                                    />
+                                                    <StatusBadge status={lead.status} />
                                                 </td>
                                                 <td className="px-5 py-3.5 whitespace-nowrap text-xs text-gray-400 dark:text-gray-500">
                                                     {new Date(lead.createdAt).toLocaleString()}
                                                 </td>
                                                 <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
                                                     <div className="flex items-center gap-1.5 justify-end">
-                                                        {lead.phone && (
-                                                            <button
-                                                                onClick={() => handleCopyPhone(lead.id, lead.phone)}
-                                                                title="Copy phone number"
-                                                                className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all ${
-                                                                    copiedId === lead.id
-                                                                        ? "bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400"
-                                                                        : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
-                                                                }`}
+                                                        {lead.phone ? (
+                                                            <a
+                                                                href={`tel:${sanitizePhone(lead.phone)}`}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                title={`Call ${lead.phone}`}
+                                                                className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-green-100 dark:hover:bg-green-900/40 hover:text-green-600 dark:hover:text-green-400 transition-all"
                                                             >
-                                                                {copiedId === lead.id ? <Check size={13} /> : <Copy size={13} />}
-                                                            </button>
+                                                                <Phone size={13} />
+                                                            </a>
+                                                        ) : (
+                                                            <span
+                                                                title="No phone number available"
+                                                                className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-50 dark:bg-gray-800/50 text-gray-300 dark:text-gray-600 cursor-not-allowed"
+                                                            >
+                                                                <Phone size={13} />
+                                                            </span>
                                                         )}
                                                         {lead.email && (
                                                             <button
-                                                                onClick={() => { window.location.href = `mailto:${lead.email}`; }}
+                                                                onClick={() => { window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(lead.email)}`, "_blank", "noopener,noreferrer"); }}
                                                                 title={`Email ${lead.email}`}
                                                                 className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 hover:text-blue-600 dark:hover:text-blue-400 transition-all"
                                                             >

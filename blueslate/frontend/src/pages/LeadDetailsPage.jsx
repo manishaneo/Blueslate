@@ -1,12 +1,20 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import axios from "axios";
 import {
-    ArrowLeft, Copy, Check, Mail, Phone, User, Calendar, Tag,
+    ArrowLeft, Mail, Phone, User, Calendar, Tag,
     MessageSquare, PhoneCall, Zap, Clock, Activity,
     CheckCircle2, XCircle, AlertCircle, MessageCircle, FileText,
 } from "lucide-react";
-import { API_BASE_URL } from "../utils/api";
+import api from "../utils/api";
+import { updateLeadStatus, getLeadConversations } from "../services/leadService";
+
+function sanitizePhone(phone) {
+    if (!phone) return null;
+    const trimmed = phone.trim();
+    const hasPlus = trimmed.startsWith("+");
+    const digits = trimmed.replace(/\D/g, "");
+    return digits ? (hasPlus ? `+${digits}` : digits) : null;
+}
 
 // ── lead source labels ────────────────────────────────────────────────────────
 
@@ -56,17 +64,6 @@ function bizKey() {
     return localStorage.getItem("businessContextId") || "default";
 }
 
-// TODO: Future API — GET /api/leads/:id/conversations
-function loadConversationsForLead(lead) {
-    try {
-        const all = JSON.parse(localStorage.getItem(`customerConversations_${bizKey()}`) || "[]");
-        if (!lead) return [];
-        return all.filter(c =>
-            (lead.email && c.customerEmail?.toLowerCase() === lead.email?.toLowerCase()) ||
-            (lead.phone && c.customerPhone === lead.phone)
-        );
-    } catch { return []; }
-}
 
 // TODO: Future API — GET /api/leads/:id/calls
 function loadCallsForLead(lead) {
@@ -80,21 +77,6 @@ function loadCallsForLead(lead) {
     } catch { return []; }
 }
 
-function loadStatusOverride(leadId) {
-    try {
-        const overrides = JSON.parse(localStorage.getItem(`leadStatusOverrides_${bizKey()}`) || "{}");
-        return overrides[String(leadId)] ?? null;
-    } catch { return null; }
-}
-
-function saveStatusOverride(leadId, status) {
-    try {
-        const key = `leadStatusOverrides_${bizKey()}`;
-        const overrides = JSON.parse(localStorage.getItem(key) || "{}");
-        overrides[String(leadId)] = status;
-        localStorage.setItem(key, JSON.stringify(overrides));
-    } catch { /* quota */ }
-}
 
 // Build a synthetic lead object from a conversation record (demo fallback)
 function leadFromConversation(conv) {
@@ -176,12 +158,12 @@ export default function LeadDetailsPage() {
     const navigate     = useNavigate();
     const { state }    = useLocation();
 
-    const [lead, setLead]         = useState(null);
-    const [loading, setLoading]   = useState(true);
-    const [notFound, setNotFound] = useState(false);
-    const [status, setStatus]     = useState(null);
-    const [updating, setUpdating] = useState(false);
-    const [copied, setCopied]     = useState(null);
+    const [lead, setLead]               = useState(null);
+    const [loading, setLoading]         = useState(true);
+    const [notFound, setNotFound]       = useState(false);
+    const [status, setStatus]           = useState(null);
+    const [updating, setUpdating]       = useState(false);
+    const [conversations, setConversations] = useState([]);
 
     // ── load lead ───────────────────────────────────────────────────────────
 
@@ -189,23 +171,20 @@ export default function LeadDetailsPage() {
         async function resolve() {
             // 1. Prefer lead passed through navigation state (from LeadsPage row click)
             if (state?.lead) {
-                const override = loadStatusOverride(leadId);
                 setLead(state.lead);
-                setStatus(override ?? state.lead.status ?? "NEW");
+                setStatus(state.lead.status ?? "NEW");
                 setLoading(false);
                 return;
             }
 
-            // TODO: Future API — GET /api/leads/:id
             try {
-                const { data } = await axios.get(`${API_BASE_URL}/leads/${leadId}`);
-                const lead = data?.data ?? data;
-                const override = loadStatusOverride(leadId);
+                const response = await api.get(`/leads/${leadId}`);
+                const lead = response.data?.data ?? response.data;
                 setLead(lead);
-                setStatus(override ?? lead.status ?? "NEW");
+                setStatus(lead.status ?? "NEW");
                 setLoading(false);
                 return;
-            } catch { /* API unavailable, try localStorage fallback */ }
+            } catch { /* fall through to not-found state */ }
 
             // 2. Fallback: find a matching conversation record (demo mode)
             try {
@@ -215,9 +194,8 @@ export default function LeadDetailsPage() {
                 const conv = all.find(c => c.id === leadId);
                 if (conv) {
                     const mockLead = leadFromConversation(conv);
-                    const override = loadStatusOverride(leadId);
                     setLead(mockLead);
-                    setStatus(override ?? "NEW");
+                    setStatus(mockLead.status ?? "NEW");
                     setLoading(false);
                     return;
                 }
@@ -230,16 +208,24 @@ export default function LeadDetailsPage() {
         resolve();
     }, [leadId, state]);
 
+    // ── fetch conversations from API ────────────────────────────────────────
+
+    useEffect(() => {
+        if (!lead?.id || lead._fromConversation) return;
+        getLeadConversations(lead.id)
+            .then((res) => setConversations(Array.isArray(res?.data) ? res.data : []))
+            .catch(() => setConversations([]));
+    }, [lead?.id]);
+
     // ── derived data ────────────────────────────────────────────────────────
 
-    const conversations = useMemo(() => loadConversationsForLead(lead), [lead]);
-    const calls         = useMemo(() => loadCallsForLead(lead), [lead]);
+    const calls = useMemo(() => loadCallsForLead(lead), [lead]);
 
     const latestConv = conversations[0] ?? null;
 
     const lastInteraction = useMemo(() => {
         const times = [
-            ...conversations.map(c => c.startedAt),
+            ...conversations.map(c => c.metadata?.startedAt ?? c.createdAt),
             ...calls.map(c => c.startedAt),
         ].filter(Boolean).sort((a, b) => new Date(b) - new Date(a));
         return times[0] ?? null;
@@ -249,27 +235,19 @@ export default function LeadDetailsPage() {
 
     async function handleStatusChange(newStatus) {
         if (newStatus === status || updating) return;
+        const previousStatus = status;
         setUpdating(true);
         setStatus(newStatus);
-        saveStatusOverride(leadId, newStatus);
-
-        // TODO: Future API — PATCH /api/leads/:id/status
         try {
-            await axios.patch(`${API_BASE_URL}/leads/${leadId}/status`, { status: newStatus });
-        } catch { /* persist locally; API will sync later */ }
-
-        setUpdating(false);
+            await updateLeadStatus(leadId, newStatus);
+        } catch {
+            setStatus(previousStatus);
+        } finally {
+            setUpdating(false);
+        }
     }
 
     // ── copy helper ─────────────────────────────────────────────────────────
-
-    function handleCopy(key, value) {
-        if (!value) return;
-        navigator.clipboard.writeText(value).then(() => {
-            setCopied(key);
-            setTimeout(() => setCopied(null), 2000);
-        });
-    }
 
     // ── render guards ────────────────────────────────────────────────────────
 
@@ -333,18 +311,11 @@ export default function LeadDetailsPage() {
             active: "bg-green-600 hover:bg-green-700 text-white",
             done: "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 cursor-default",
         },
-        {
-            key: "CLOSED",
-            label: "Mark Closed",
-            Icon: XCircle,
-            active: "bg-gray-500 hover:bg-gray-600 text-white",
-            done: "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-default",
-        },
     ];
 
     const isDone = (key) => status === key;
     const isPast = (key) => {
-        const order = ["NEW", "CONTACTED", "CONVERTED", "CLOSED"];
+        const order = ["NEW", "CONTACTED", "CONVERTED"];
         return order.indexOf(status) > order.indexOf(key);
     };
 
@@ -386,27 +357,33 @@ export default function LeadDetailsPage() {
 
                     {/* Header actions */}
                     <div className="flex items-center gap-2">
-                        {lead.phone && (
-                            <button
-                                onClick={() => handleCopy("header-phone", lead.phone)}
-                                className={`flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-xl border font-medium transition-all ${
-                                    copied === "header-phone"
-                                        ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400"
-                                        : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm"
-                                }`}
+                        {lead.phone ? (
+                            <a
+                                href={`tel:${sanitizePhone(lead.phone)}`}
+                                className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-green-50 dark:hover:bg-green-900/20 hover:text-green-700 dark:hover:text-green-400 hover:border-green-300 dark:hover:border-green-700 shadow-sm font-medium transition-all"
                             >
-                                {copied === "header-phone" ? <Check size={14} /> : <Copy size={14} />}
-                                {copied === "header-phone" ? "Copied!" : "Copy Phone"}
-                            </button>
+                                <Phone size={14} />
+                                Call
+                            </a>
+                        ) : (
+                            <span
+                                title="No phone number available"
+                                className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-300 dark:text-gray-600 font-medium cursor-not-allowed"
+                            >
+                                <Phone size={14} />
+                                Call
+                            </span>
                         )}
                         {lead.email && (
-                            <button
-                                onClick={() => { window.location.href = `mailto:${lead.email}`; }}
+                            <a
+                                href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(lead.email)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 className="flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors shadow-sm"
                             >
                                 <Mail size={14} />
                                 Send Email
-                            </button>
+                            </a>
                         )}
                     </div>
                 </div>
@@ -472,10 +449,10 @@ export default function LeadDetailsPage() {
                             <div className="mt-3 flex items-center gap-4 text-xs text-gray-400 dark:text-gray-500">
                                 <span className="flex items-center gap-1">
                                     <Clock size={11} />
-                                    {formatRelative(latestConv.startedAt)}
+                                    {formatRelative(latestConv.metadata?.startedAt ?? latestConv.createdAt)}
                                 </span>
                                 <span className="flex items-center gap-1">
-                                    {latestConv.source === "CHAT"
+                                    {latestConv.source?.includes("chat")
                                         ? <MessageSquare size={11} />
                                         : <PhoneCall size={11} />
                                     }
@@ -499,7 +476,7 @@ export default function LeadDetailsPage() {
 
                             <div className="space-y-3">
                                 {latestConv.transcript.slice(-6).map((msg, i) => {
-                                    const isCustomer = msg.role === "customer";
+                                    const isCustomer = msg.role === "user";
                                     return (
                                         <div
                                             key={i}
@@ -520,7 +497,7 @@ export default function LeadDetailsPage() {
                                                 <p className={`text-[10px] font-semibold mb-1 ${isCustomer ? "text-blue-200" : "text-blue-600 dark:text-blue-400"}`}>
                                                     {isCustomer ? lead.name : "AI Receptionist"}
                                                 </p>
-                                                {msg.text}
+                                                {msg.content}
                                             </div>
                                             {isCustomer && (
                                                 <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0 mt-0.5">
@@ -637,16 +614,16 @@ export default function LeadDetailsPage() {
                                         className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-800/60"
                                     >
                                         <div className="flex items-center gap-2 min-w-0">
-                                            {c.source === "CHAT"
+                                            {c.source?.includes("chat")
                                                 ? <MessageSquare size={13} className="text-blue-500 shrink-0" />
                                                 : <PhoneCall size={13} className="text-emerald-500 shrink-0" />
                                             }
                                             <div className="min-w-0">
-                                                <p className="text-xs font-medium text-gray-700 dark:text-gray-300 capitalize truncate">{c.intent}</p>
-                                                <p className="text-[10px] text-gray-400 dark:text-gray-500">{formatRelative(c.startedAt)}</p>
+                                                <p className="text-xs font-medium text-gray-700 dark:text-gray-300 capitalize truncate">{c.metadata?.lastIntent ?? c.source?.replace(/_/g, " ") ?? "—"}</p>
+                                                <p className="text-[10px] text-gray-400 dark:text-gray-500">{formatRelative(c.metadata?.startedAt ?? c.createdAt)}</p>
                                             </div>
                                         </div>
-                                        {c.leadCaptured && (
+                                        {c.metadata?.outcome === "LEAD_CAPTURED" && (
                                             <span className="shrink-0">
                                                 <Zap size={11} className="text-green-500" />
                                             </span>

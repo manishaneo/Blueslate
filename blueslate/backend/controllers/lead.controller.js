@@ -1,4 +1,4 @@
-import { createLeadForActiveContext, getLeads, updateLeadStatus } from "../services/lead.service.js";
+import { createLeadForActiveContext, getLead, getLeads, updateLeadStatus, getLeadConversations } from "../services/lead.service.js";
 
 const VALID_STATUSES = new Set(["NEW", "CONTACTED", "CONVERTED"]);
 
@@ -60,6 +60,23 @@ export const exportLeadsHandler = async (req, res, next) => {
     }
 };
 
+export const getLeadHandler = async (req, res, next) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(400).json({ success: false, message: "Invalid lead ID." });
+        }
+        const activeBusinessId = req.headers["x-active-business-id"] ?? null;
+        const lead = await getLead(id, req.user.id, activeBusinessId);
+        if (!lead) {
+            return res.status(404).json({ success: false, message: "Lead not found." });
+        }
+        res.json({ success: true, data: lead });
+    } catch (error) {
+        next(error);
+    }
+};
+
 export const getLeadsHandler = async (req, res, next) => {
     try {
         const activeBusinessId = req.headers["x-active-business-id"] ?? null;
@@ -70,6 +87,23 @@ export const getLeadsHandler = async (req, res, next) => {
             data: leads,
         });
     } catch (error) {
+        next(error);
+    }
+};
+
+export const getLeadConversationsHandler = async (req, res, next) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(400).json({ success: false, message: "Invalid lead ID." });
+        }
+        const activeBusinessId = req.headers["x-active-business-id"] ?? null;
+        const conversations = await getLeadConversations(id, req.user.id, activeBusinessId);
+        res.json({ success: true, data: conversations });
+    } catch (error) {
+        if (error.code === "P2025") {
+            return res.status(404).json({ success: false, message: "Lead not found." });
+        }
         next(error);
     }
 };
