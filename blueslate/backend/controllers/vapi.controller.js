@@ -448,17 +448,43 @@ async function _resolveBusinessContext(call) {
     //    Requires the VAPI assistant tool to be configured as a Server URL / Function tool
     //    (not API Request Tool) so that VAPI forwards the full call object including metadata.
     const metaBusinessId = call?.metadata?.businessId;
+
+    // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
+    console.log(`[VAPI DEBUG] metaBusinessId: ${metaBusinessId ?? "(none — call.metadata.businessId not present)"}`);
+    // ── END DIAGNOSTIC ────────────────────────────────────────────────────────
+
     if (metaBusinessId) {
         console.log(`[VAPI] resolving via call metadata: ${metaBusinessId}`);
         const ctx = await prisma.businessContext.findFirst({
             where:   { businessId: metaBusinessId },
             orderBy: { createdAt: "desc" },
         });
+
+        // ── DIAGNOSTIC ────────────────────────────────────────────────────────
+        console.log(`[VAPI DEBUG] BusinessContext found: ${!!ctx}`);
+        if (ctx) {
+            console.log(`[VAPI DEBUG] BusinessContext.id: ${ctx.id}`);
+            console.log(`[VAPI DEBUG] BusinessContext.businessId: ${ctx.businessId}`);
+            console.log(`[VAPI DEBUG] Content preview: ${ctx.content ? ctx.content.slice(0, 100).replace(/\n/g, " ") : "(null — no content)"}`);
+        }
+        // ── END DIAGNOSTIC ────────────────────────────────────────────────────
+
         if (ctx) {
             console.log(`[VAPI] resolved — id: ${ctx.id}, businessId: ${ctx.businessId}`);
             return ctx;
         }
         console.warn(`[VAPI] WARNING: call metadata businessId ${metaBusinessId} matched no BusinessContext row`);
+
+        // ── DIAGNOSTIC: check the NEW BusinessContextRecord table ─────────────
+        try {
+            const recordCount = await prisma.businessContextRecord.count({
+                where: { businessId: metaBusinessId },
+            });
+            console.log(`[VAPI DEBUG] BusinessContextRecord rows for same businessId: ${recordCount}`);
+        } catch (err) {
+            console.log(`[VAPI DEBUG] BusinessContextRecord query failed: ${err.message}`);
+        }
+        // ── END DIAGNOSTIC ────────────────────────────────────────────────────
     }
 
     // 2. VAPI dashboard "Talk" button testing — set VAPI_TEST_BUSINESS_ID to a real
@@ -466,6 +492,11 @@ async function _resolveBusinessContext(call) {
     //    Rejected if not a valid UUID: prevents placeholder values from hitting the DB.
     const testBusinessId = process.env.VAPI_TEST_BUSINESS_ID;
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
+    console.log(`[VAPI DEBUG] Used fallback VAPI_TEST_BUSINESS_ID: ${!!(testBusinessId && UUID_RE.test(testBusinessId))}`);
+    // ── END DIAGNOSTIC ────────────────────────────────────────────────────────
+
     if (testBusinessId && UUID_RE.test(testBusinessId)) {
         console.log(`[VAPI] resolving via VAPI_TEST_BUSINESS_ID: ${testBusinessId}`);
         try {

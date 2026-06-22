@@ -1,4 +1,5 @@
 import axios from "axios";
+import prisma from "../prismaClient.js";
 import { AppError } from "../middleware/AppError.js";
 
 const VAPI_BASE = "https://api.vapi.ai";
@@ -26,6 +27,28 @@ export async function initiateVapiOutboundCall(customerPhone, businessId) {
         throw new AppError("Voice calling is not configured. Please try again later.", 503);
     }
 
+    // Fetch persona name and business name so VAPI can substitute
+    // {{aiPersonaName}} and {{businessName}} in the assistant system prompt.
+    let aiPersonaName = "Auri";
+    let businessName  = "";
+    try {
+        const [settings, context] = await Promise.all([
+            prisma.businessSettings.findUnique({
+                where:  { businessId },
+                select: { aiPersonaName: true },
+            }),
+            prisma.businessContext.findFirst({
+                where:   { businessId },
+                orderBy: { createdAt: "desc" },
+                select:  { title: true },
+            }),
+        ]);
+        if (settings?.aiPersonaName) aiPersonaName = settings.aiPersonaName;
+        if (context?.title)          businessName  = context.title;
+    } catch (err) {
+        console.warn("[Outbound] Could not fetch business settings for persona — using defaults:", err.message);
+    }
+
     let response;
     try {
         response = await axios.post(
@@ -35,6 +58,9 @@ export async function initiateVapiOutboundCall(customerPhone, businessId) {
                 phoneNumberId,
                 customer:  { number: customerPhone },
                 metadata:  { businessId },
+                assistantOverrides: {
+                    variableValues: { aiPersonaName, businessName },
+                },
             },
             {
                 headers: {
