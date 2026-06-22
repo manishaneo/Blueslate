@@ -167,10 +167,16 @@ async function _handleGetBusinessInfo(call, query) {
             return "I don't have business information loaded yet. Please call back shortly.";
         }
 
-        const vapiSettings = await prisma.businessSettings.findUnique({
-            where:  { businessId: businessContext.businessId },
-            select: { aiPersonaName: true, tone: true, language: true },
-        });
+        // businessContext.businessId is null for the XP League demo seed row
+        // (created with businessId = null in demo.controller.js:handleDemoSeed).
+        // Prisma throws PrismaClientValidationError on findUnique({ where: { businessId: null } })
+        // because businessId is a non-nullable @unique field. Guard before calling.
+        const vapiSettings = businessContext.businessId
+            ? await prisma.businessSettings.findUnique({
+                  where:  { businessId: businessContext.businessId },
+                  select: { aiPersonaName: true, tone: true, language: true },
+              })
+            : null;
 
         const { name, email, phone, interest } = extractLeadData(query);
         if (email || phone) {
@@ -205,7 +211,10 @@ async function _handleGetBusinessInfo(call, query) {
 
         return answer;
     } catch (err) {
-        console.error("[VAPI FULL ERROR]", err);
+        console.error("[VAPI FULL ERROR] ── _handleGetBusinessInfo caught an exception ──");
+        console.error("[VAPI FULL ERROR] err.name   :", err?.name);
+        console.error("[VAPI FULL ERROR] err.message:", err?.message);
+        console.error("[VAPI FULL ERROR] err.stack  :", err?.stack);
         return "I'm sorry, I'm having trouble answering right now. Please try again shortly.";
     }
 }
