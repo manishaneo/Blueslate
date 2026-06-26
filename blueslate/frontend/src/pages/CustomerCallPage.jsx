@@ -64,6 +64,10 @@ export default function CustomerCallPage() {
         navigate("/customer", { state: { step: 2, businessName, receptionistName, website, token } });
     }, [token, businessName, receptionistName, website, navigate]);
 
+    const handleManualDoneClick = () => {
+        setCallEnded(true);
+    };
+
     // ── Call polling ──────────────────────────────────────────────────────────
     useEffect(() => {
         if (!calling || !callId || callEnded) return;
@@ -169,13 +173,22 @@ export default function CustomerCallPage() {
                         <ArrowLeft size={13} />
                         Back to Portal
                     </button>
-                    <button
-                        onClick={toggle}
-                        className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-all"
-                        title={dark ? "Light mode" : "Dark mode"}
-                    >
-                        {dark ? <Sun size={15} /> : <Moon size={15} />}
-                    </button>
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={handleManualDoneClick}
+                            className="flex items-center gap-1.5 text-sm font-semibold text-gray-400 hover:text-white transition-colors"
+                        >
+                            <CheckCircle2 size={16} className="text-green-500" />
+                            Done
+                        </button>
+                        <button
+                            onClick={toggle}
+                            className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-all"
+                            title={dark ? "Light mode" : "Dark mode"}
+                        >
+                            {dark ? <Sun size={15} /> : <Moon size={15} />}
+                        </button>
+                    </div>
                 </div>
 
                 {/* Content */}
