@@ -122,6 +122,7 @@ export default function CustomerChatPage() {
     );
     const [conversationId,   setConversationId]   = useState(persist?.conversationId   || null);
     const [chatEscalated,    setChatEscalated]    = useState(persist?.chatEscalated    || false);
+    const [chatEnded,        setChatEnded]        = useState(persist?.chatEnded        || false);
     const [inputText,        setInputText]        = useState("");
     const [chatLoading,      setChatLoading]      = useState(false);
     const [chatError,        setChatError]        = useState(null);
