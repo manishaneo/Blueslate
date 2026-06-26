@@ -284,6 +284,11 @@ export const detectIntent = (message) => {
         if (score > bestScore) {
             bestScore  = score;
             bestIntent = intent;
+        } else if (score === bestScore && score > 0) {
+            // Tie-breaker: Always prioritize intents that require a human!
+            if (REQUIRES_HUMAN.has(intent) && !REQUIRES_HUMAN.has(bestIntent)) {
+                bestIntent = intent;
+            }
         }
     }
 
