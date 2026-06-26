@@ -251,10 +251,6 @@ export default function CustomerChatPage() {
                 }
             } else if (!chatAwaitingLeadCaptureRef.current && LEAD_CAPTURE_INTENTS.has(intent?.intent)) {
                 chatAwaitingLeadCaptureRef.current = true;
-                setMessages((prev) => [...prev, {
-                    role:    "assistant",
-                    content: "I'd be happy to help. Could I get your name and email address or phone number so our team can contact you?",
-                }]);
             }
         } catch {
             setChatError("Could not reach the server. Please try again.");

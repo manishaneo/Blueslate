@@ -205,12 +205,6 @@ export default function CustomerCallPage() {
                         </div>
                     </div>
 
-                    <button
-                        onClick={handleDone}
-                        className="text-sm text-gray-500 hover:text-gray-300 underline underline-offset-2 transition-colors"
-                    >
-                        Done
-                    </button>
                 </div>
             </div>
         );
