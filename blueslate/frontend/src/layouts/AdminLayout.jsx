@@ -18,13 +18,17 @@ import {
     ChevronDown,
     Check,
     Plus,
+    Inbox
 } from "lucide-react";
 import { useTheme } from "../hooks/useTheme";
 import { getCurrentUser, logout, setAuth } from "../utils/auth";
 import { refreshBusinesses } from "../services/authService";
+import { NotificationProvider } from "../contexts/NotificationContext";
+import { NotificationBell } from "../components/inbox/NotificationBell";
 
 const NAV_ITEMS = [
     { label: "Dashboard",      path: "/dashboard",     Icon: LayoutDashboard },
+    { label: "Customer Inbox", path: "/inbox",         Icon: Inbox },
     { label: "Leads",          path: "/leads",          Icon: Users },
     { label: "Conversations",  path: "/conversations",  Icon: MessageSquare },
     { label: "Call History",   path: "/call-history",   Icon: PhoneCall },
@@ -330,6 +334,7 @@ export default function AdminLayout() {
     };
 
     return (
+        <NotificationProvider>
         <div className="flex h-screen bg-gray-50 dark:bg-gray-950 overflow-hidden">
 
             {/* ── Desktop sidebar ───────────────────────────────────────────── */}
@@ -422,6 +427,10 @@ export default function AdminLayout() {
 
                     {/* Right actions */}
                     <div className="ml-auto flex items-center gap-1.5">
+                        <NotificationBell />
+
+                        <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1.5" />
+
                         <button
                             onClick={toggle}
                             className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -456,5 +465,6 @@ export default function AdminLayout() {
                 </main>
             </div>
         </div>
+        </NotificationProvider>
     );
 }

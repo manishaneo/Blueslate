@@ -607,7 +607,7 @@ export default function CallHistoryPage() {
                         <table className="w-full text-sm min-w-[700px]">
                             <thead>
                                 <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-100 dark:border-gray-800">
-                                    {["Date", "Duration", "Outcome", "Last Intent", "Lead", ""].map((h) => (
+                                    {["Date", "Duration", "Outcome", "Last Intent", "Lead", "Phone", ""].map((h) => (
                                         <th
                                             key={h}
                                             className={`text-left px-5 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide ${!h ? "w-24" : ""}`}
@@ -661,12 +661,18 @@ export default function CallHistoryPage() {
                                                                 {lead.email}
                                                             </p>
                                                         )}
-                                                        {lead.phone && (
-                                                            <p className="text-xs text-gray-400 dark:text-gray-500">
-                                                                {lead.phone}
-                                                            </p>
+                                                        {!lead.name && !lead.email && (
+                                                            <p className="text-sm text-gray-400 italic">Unknown Lead</p>
                                                         )}
                                                     </div>
+                                                ) : (
+                                                    <span className="text-gray-400 dark:text-gray-600">—</span>
+                                                )}
+                                            </td>
+
+                                            <td className="px-5 py-3.5">
+                                                {phone ? (
+                                                    <span className="text-sm text-gray-600 dark:text-gray-400">{phone}</span>
                                                 ) : (
                                                     <span className="text-gray-400 dark:text-gray-600">—</span>
                                                 )}

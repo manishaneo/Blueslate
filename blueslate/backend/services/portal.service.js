@@ -7,6 +7,7 @@ import { detectIntent, getSmallTalkResponse }     from "./intent.service.js";
 import { generateGroqAnswer, generateConversationSummary } from "./groq.service.js";
 import { extractLeadData }                        from "./leadExtraction.service.js";
 import { createLead, findLeadByEmail }            from "./lead.service.js";
+import { triggerEscalation }                      from "./escalation.service.js";
 
 const PORTAL_TOKEN_EXPIRY = "24h";
 
@@ -225,17 +226,35 @@ export async function portalChat(conversationToken, question, conversationId, so
             console.log("[portal-debug] portalChat | raw question:", JSON.stringify(question));
             console.log("[portal-debug] portalChat | extractLeadData result:", JSON.stringify({ name, email, phone }));
             if (email || phone) {
-                console.log("[portal-debug] portalChat | email/phone found — checking dedup. businessContextId:", businessContextId);
-                const existing = email
-                    ? await findLeadByEmail(email, [businessContextId])
-                    : null;
-                console.log("[portal-debug] portalChat | dedup result:", existing ? `existing id=${existing.id}` : "none");
-                if (!existing) {
-                    const payload = { businessContextId, name, email, phone, interest };
-                    console.log("[portal-debug] portalChat | calling createLead with:", JSON.stringify(payload));
-                    const newLead = await createLead(payload);
-                    createdLeadId = newLead?.id ?? null;
-                    console.log("[portal-debug] portalChat | createLead succeeded — leadId:", createdLeadId);
+                if (conversation?.leadId) {
+                    console.log("[portal-debug] portalChat | conversation already has leadId:", conversation.leadId, "updating contact info.");
+                    await prisma.lead.update({
+                        where: { id: conversation.leadId },
+                        data: {
+                            ...(name ? { name } : {}),
+                            ...(email ? { email } : {}),
+                            ...(phone ? { phone } : {}),
+                            // Transition from NEEDS_CONTACT_INFO to NEW if we just got contact info
+                            status: "NEW"
+                        }
+                    });
+                    createdLeadId = conversation.leadId;
+                } else {
+                    console.log("[portal-debug] portalChat | email/phone found — checking dedup. businessContextId:", businessContextId);
+                    const existing = email
+                        ? await findLeadByEmail(email, [businessContextId])
+                        : null;
+                    console.log("[portal-debug] portalChat | dedup result:", existing ? `existing id=${existing.id}` : "none");
+                    if (!existing) {
+                        const payload = { businessContextId, name, email, phone, interest };
+                        console.log("[portal-debug] portalChat | calling createLead with:", JSON.stringify(payload));
+                        const newLead = await createLead(payload);
+                        createdLeadId = newLead?.id ?? null;
+                        console.log("[portal-debug] portalChat | createLead succeeded — leadId:", createdLeadId);
+                    } else {
+                        createdLeadId = existing.id;
+                        console.log("[portal-debug] portalChat | using existing leadId:", createdLeadId);
+                    }
                 }
             } else {
                 console.log("[portal-debug] portalChat | no email/phone in question — lead creation skipped");
@@ -350,6 +369,31 @@ export async function portalChat(conversationToken, question, conversationId, so
                 ...(escalationMeta ? { metadata: escalationMeta } : {}),
             },
         });
+    }
+
+    // Milestone 3: Trigger Escalation via EscalationService
+    if (intentData.requiresHuman) {
+        let reqType = "ESCALATION";
+        if (intentData.intent === "complaint") reqType = "COMPLAINT";
+        else if (intentData.intent === "speak_to_human") reqType = "CALLBACK_REQUEST";
+
+        try {
+            await triggerEscalation({
+                businessId,
+                conversationId: conversation.id,
+                leadId: leadId !== null ? leadId : undefined,
+                requestType: reqType,
+                aiSummary: `AI detected ${intentData.intent} with confidence ${intentData.confidence}`,
+                aiReason: question,
+                suggestedAction: "Review the chat transcript and assist the customer.",
+                activities: [
+                    { type: "SYSTEM", description: "Conversation Started" },
+                    { type: "CREATED", description: "AI Escalated Chat" }
+                ]
+            });
+        } catch (escErr) {
+            console.error("[portal-debug] portalChat -> triggerEscalation FAILED:", escErr.message);
+        }
     }
 
     // Fire-and-forget summary generation

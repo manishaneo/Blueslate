@@ -26,6 +26,8 @@ import demoRoutes from "./routes/demo.routes.js";
 import appAdminRoutes from "./routes/appAdmin.routes.js";
 import twilioRoutes from "./routes/twilio.routes.js";
 import vapiRoutes from "./routes/vapi.routes.js";
+import requestRoutes from "./routes/request.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { authenticate } from "./middleware/authenticate.js";
 import { requireRole } from "./middleware/requireRole.js";
@@ -74,6 +76,8 @@ app.use("/api/settings", authenticate, settingsRoutes);
 app.use("/api/conversations", authenticate, conversationsRoutes);
 app.use("/api/knowledge-base", authenticate, knowledgeBaseRoutes);
 app.use("/api/analytics", authenticate, analyticsRoutes);
+app.use("/api/requests", authenticate, requestRoutes);
+app.use("/api/notifications", authenticate, notificationRoutes);
 
 app.get("/", (req, res) => {
     res.send("Backend Running");

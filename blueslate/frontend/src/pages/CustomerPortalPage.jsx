@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useState, useMemo, useEffect } from "react";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import {
     ArrowLeft,
     ArrowRight,
@@ -18,7 +18,7 @@ import {
     Sun,
 } from "lucide-react";
 import { useTheme } from "../hooks/useTheme";
-import { Wordmark } from "../components/CustomerPortalComponents";
+import { BusinessAvatar, PoweredBy } from "../components/CustomerPortalComponents";
 import { API_BASE_URL } from "../utils/api";
 
 // ── Local helper components ───────────────────────────────────────────────────
@@ -74,6 +74,7 @@ export default function CustomerPortalPage() {
     const { dark, toggle } = useTheme();
     const navigate         = useNavigate();
     const location         = useLocation();
+    const [searchParams]   = useSearchParams();
 
     // When returning from /chat/:token or /receptionist/:token via the Back button,
     // location.state carries { step: 2, businessName, receptionistName, website, token }
@@ -113,16 +114,17 @@ export default function CustomerPortalPage() {
 
     // ── Handlers ─────────────────────────────────────────────────────────────
 
-    const handleLookup = async (e) => {
-        e.preventDefault();
-        if (!website.trim()) return;
+    const handleLookup = async (e, websiteOverride = null) => {
+        if (e) e.preventDefault();
+        const targetWebsite = websiteOverride || website.trim();
+        if (!targetWebsite) return;
         setLookupLoading(true);
         setLookupError(null);
         try {
             const res  = await fetch(`${API_BASE_URL}/portal/lookup`, {
                 method:  "POST",
                 headers: { "Content-Type": "application/json" },
-                body:    JSON.stringify({ website: website.trim() }),
+                body:    JSON.stringify({ website: targetWebsite }),
             });
             const data = await res.json();
             if (!res.ok) {
@@ -140,6 +142,15 @@ export default function CustomerPortalPage() {
             setLookupLoading(false);
         }
     };
+
+    // Auto-lookup from query param
+    useEffect(() => {
+        const queryWebsite = searchParams.get("website");
+        if (queryWebsite && step === 1 && !website && !returnState) {
+            setWebsite(queryWebsite);
+            handleLookup(null, queryWebsite);
+        }
+    }, [searchParams, step, returnState]);
 
     const saveSession = (token) => {
         try {
@@ -172,7 +183,7 @@ export default function CustomerPortalPage() {
 
     if (step === 1) {
         return (
-            <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-900 flex items-center justify-center px-4 py-8 relative">
+            <div className="min-h-[100dvh] bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-900 flex flex-col items-center justify-center px-4 py-8 relative">
 
                 {/* Theme toggle */}
                 <div className="absolute top-5 right-6 z-10">
@@ -189,8 +200,8 @@ export default function CustomerPortalPage() {
                     <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-xl shadow-gray-200/60 dark:shadow-gray-950/60 border border-gray-100 dark:border-gray-800 overflow-hidden">
 
                         {/* Card header */}
-                        <div className="px-7 pt-6 pb-5 border-b border-gray-100 dark:border-gray-800">
-                            <Wordmark />
+                        <div className="px-7 pt-6 pb-5 border-b border-gray-100 dark:border-gray-800 text-center">
+                            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Customer Portal</h2>
                         </div>
 
                         {/* Form */}
@@ -251,6 +262,10 @@ export default function CustomerPortalPage() {
                             </form>
                         </div>
                     </div>
+                    
+                    <div className="mt-8">
+                        <PoweredBy />
+                    </div>
                 </div>
             </div>
         );
@@ -267,7 +282,7 @@ export default function CustomerPortalPage() {
     const hasAnyInfo      = hasDescription || hasServices || hasPrograms || hasHours || hasContact;
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-slate-50 via-blue-50/20 to-white dark:from-gray-950 dark:via-gray-900 dark:to-gray-900">
+        <div className="min-h-[100dvh] bg-gradient-to-b from-slate-50 via-blue-50/20 to-white dark:from-gray-950 dark:via-gray-900 dark:to-gray-900 flex flex-col">
 
             {/* ── Sticky header ─────────────────────────────────────────────── */}
             <div className="sticky top-0 z-20 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border-b border-gray-100 dark:border-gray-800">
@@ -281,7 +296,8 @@ export default function CustomerPortalPage() {
                             <span>Back</span>
                         </button>
                         <div className="w-px h-4 bg-gray-200 dark:bg-gray-700" />
-                        <Wordmark />
+                        <BusinessAvatar businessName={businessName} logoUrl={bd?.logoUrl} className="w-8 h-8" />
+                        <span className="text-[13px] font-bold text-gray-900 dark:text-white tracking-tight leading-tight hidden sm:inline">{businessName}</span>
                     </div>
                     <button
                         onClick={toggle}
@@ -299,10 +315,8 @@ export default function CustomerPortalPage() {
                 {/* ── Hero ──────────────────────────────────────────────────── */}
                 <div className="flex flex-col items-center text-center pb-8">
                     {/* Avatar */}
-                    <div className="w-[72px] h-[72px] rounded-[22px] bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-xl shadow-blue-300/40 dark:shadow-blue-900/60 mb-5">
-                        <span className="text-[30px] font-black text-white select-none leading-none">
-                            {(businessName || "B").charAt(0).toUpperCase()}
-                        </span>
+                    <div className="mb-5">
+                        <BusinessAvatar businessName={businessName} logoUrl={bd?.logoUrl} className="w-[72px] h-[72px] shadow-xl text-[30px]" />
                     </div>
 
                     <h1 className="text-[26px] font-extrabold text-gray-900 dark:text-white leading-tight tracking-tight">
@@ -413,7 +427,6 @@ export default function CustomerPortalPage() {
                         </button>
                     </div>
 
-                    {/* Visit Website — secondary action */}
                     {visitUrl && (
                         <div className="mt-5 text-center">
                             <a
@@ -428,6 +441,10 @@ export default function CustomerPortalPage() {
                             </a>
                         </div>
                     )}
+                    
+                    <div className="mt-8">
+                        <PoweredBy />
+                    </div>
                 </div>
             </div>
         </div>

@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, Loader2, Moon, Send, Sun } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import { useTheme } from "../hooks/useTheme";
-import { Wordmark, LeadCaptureForm, PostConvOverlay, FollowUpPrompt } from "../components/CustomerPortalComponents";
+import { BusinessAvatar, FollowUpScreen } from "../components/CustomerPortalComponents";
 import { API_BASE_URL } from "../utils/api";
 const LEAD_CAPTURE_INTENTS = new Set(["trial_booking", "admissions", "pricing"]);
 
@@ -30,18 +31,33 @@ function saveChatSession(token, data) {
 function MessageBubble({ role, content, agentName, time }) {
     const isUser = role === "user";
     return (
-        <div className={`flex flex-col ${isUser ? "items-end" : "items-start"} gap-0.5`}>
+        <div className={`flex flex-col ${isUser ? "items-end" : "items-start"} gap-0.5 animate-fade-in-up`}>
             <p className="text-[10px] font-medium text-gray-400 dark:text-gray-600 px-1">
                 {isUser
                     ? `${time ? `${fmtTime(time)} · ` : ""}You`
                     : `${agentName || "Receptionist"}${time ? ` · ${fmtTime(time)}` : ""}`}
             </p>
-            <div className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap break-words ${
+            <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed break-words ${
                 isUser
-                    ? "bg-blue-600 text-white rounded-br-sm"
-                    : "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-bl-sm"
+                    ? "bg-blue-600 text-white rounded-br-sm whitespace-pre-wrap"
+                    : "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-bl-sm markdown-body"
             }`}>
-                {content}
+                {isUser ? (
+                    content
+                ) : (
+                    <ReactMarkdown
+                        components={{
+                            a: ({ node, ...props }) => <a {...props} className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer" />,
+                            ul: ({ node, ...props }) => <ul {...props} className="list-disc pl-4 space-y-1 my-2" />,
+                            ol: ({ node, ...props }) => <ol {...props} className="list-decimal pl-4 space-y-1 my-2" />,
+                            li: ({ node, ...props }) => <li {...props} className="my-0.5" />,
+                            p: ({ node, ...props }) => <p {...props} className="my-1.5 first:mt-0 last:mb-0" />,
+                            strong: ({ node, ...props }) => <strong {...props} className="font-semibold" />
+                        }}
+                    >
+                        {content}
+                    </ReactMarkdown>
+                )}
             </div>
         </div>
     );
@@ -110,20 +126,13 @@ export default function CustomerChatPage() {
     const [chatLoading,      setChatLoading]      = useState(false);
     const [chatError,        setChatError]        = useState(null);
 
-    // Outcome state (shared with call flow)
-    const [chatEnded,        setChatEnded]        = useState(persist?.chatEnded        || false);
-    const [thankYouVariant,  setThankYouVariant]  = useState(persist?.thankYouVariant  || null);
-    const [capturedLeadData, setCapturedLeadData] = useState(persist?.capturedLeadData || null);
-    const [chatOutcome,      setChatOutcome]      = useState(persist?.chatOutcome      || "INFORMATION_ONLY");
-
-    // Lead form
-    const [showLeadForm,       setShowLeadForm]       = useState(persist?.showLeadForm    || false);
-    const [leadFormLoading,    setLeadFormLoading]    = useState(false);
-    const [leadFormError,      setLeadFormError]      = useState(null);
-    const [showFollowUpPrompt, setShowFollowUpPrompt] = useState(false);
+    const [feedbackSubmitted,  setFeedbackSubmitted]  = useState(persist?.feedbackSubmitted || false);
+    const [feedbackLoading,    setFeedbackLoading]    = useState(false);
+    const [feedbackError,      setFeedbackError]      = useState(null);
 
     // ── Refs (initialized from persisted state) ───────────────────────────────
     const messagesEndRef             = useRef(null);
+    const inputRef                   = useRef(null);
     const chatAwaitingLeadCaptureRef = useRef(persist?.awaitingLeadCapture || false);
     const chatEscalatedRef           = useRef(persist?.chatEscalated       || false);
     const chatLeadCapturedRef        = useRef(persist?.leadCaptured        || false);
@@ -140,14 +149,11 @@ export default function CustomerChatPage() {
             conversationId,
             chatEscalated,
             chatEnded,
-            thankYouVariant,
-            capturedLeadData,
-            chatOutcome,
-            showLeadForm,
+            feedbackSubmitted,
             awaitingLeadCapture: chatAwaitingLeadCaptureRef.current,
             leadCaptured:        chatLeadCapturedRef.current,
         });
-    }, [messages, chatMessageTimes, conversationId, chatEscalated, chatEnded, thankYouVariant, capturedLeadData, chatOutcome, showLeadForm, token, sessionData]);
+    }, [messages, chatMessageTimes, conversationId, chatEscalated, chatEnded, feedbackSubmitted, token, sessionData]);
 
     // ── Greeting — only on first load (skip if restoring from session) ────────
     useEffect(() => {
@@ -159,10 +165,17 @@ export default function CustomerChatPage() {
         }]);
     }, [sessionData, businessName, receptionistName]);
 
-    // ── Auto-scroll ───────────────────────────────────────────────────────────
+    // ── Auto-scroll & Auto-focus ──────────────────────────────────────────────
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages, chatLoading]);
+
+    useEffect(() => {
+        // Auto-focus input when entering chat if not on mobile portrait, or if escalated
+        if (!chatEscalated && inputRef.current && window.innerWidth > 640) {
+            inputRef.current.focus();
+        }
+    }, [chatEscalated]);
 
     // ── Per-message timestamps (only for newly added messages) ────────────────
     useEffect(() => {
@@ -231,14 +244,10 @@ export default function CustomerChatPage() {
             const intent = data.data.intent;
             if (intent?.requiresHuman && !chatEscalatedRef.current) {
                 chatEscalatedRef.current = true;
-                setChatEscalated(true);
-                setMessages((prev) => [...prev, {
-                    role:    "assistant",
-                    content: "I completely understand. Let me connect you with our team — someone will follow up with you shortly.",
-                }]);
+                // No longer sending a second hardcoded message
+                // No longer setting chatEscalated(true) to disable input
                 if (!chatLeadCapturedRef.current) {
-                    setChatOutcome("ESCALATED");
-                    setShowLeadForm(true);
+                    setChatEnded(true);
                 }
             } else if (!chatAwaitingLeadCaptureRef.current && LEAD_CAPTURE_INTENTS.has(intent?.intent)) {
                 chatAwaitingLeadCaptureRef.current = true;
@@ -259,62 +268,6 @@ export default function CustomerChatPage() {
     };
 
     const handleEndChat = () => {
-        // Lead was captured inline — no further prompts needed
-        if (chatLeadCapturedRef.current) {
-            setChatOutcome("LEAD_CAPTURED");
-            setChatEnded(true);
-            return;
-        }
-        // Always ask follow-up question before ending
-        setShowFollowUpPrompt(true);
-    };
-
-    const handleFollowUpYes = () => {
-        setShowFollowUpPrompt(false);
-        if (conversationId) {
-            setChatOutcome(chatEscalatedRef.current ? "ESCALATED" : "LEAD_CAPTURED");
-            setShowLeadForm(true);
-        } else {
-            // No conversation yet — nothing to save
-            setChatOutcome("INFORMATION_ONLY");
-            setChatEnded(true);
-        }
-    };
-
-    const handleFollowUpNo = () => {
-        setShowFollowUpPrompt(false);
-        setChatOutcome("INFORMATION_ONLY");
-        setChatEnded(true);
-    };
-
-    const handleLeadFormSubmit = async ({ name, email, phone, notes }) => {
-        setLeadFormLoading(true);
-        setLeadFormError(null);
-        try {
-            const res  = await fetch(`${API_BASE_URL}/portal/leads`, {
-                method:  "POST",
-                headers: { "Content-Type": "application/json" },
-                body:    JSON.stringify({ conversationToken: token, name, email, phone, notes, conversationId }),
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.message ?? "Something went wrong.");
-
-            chatLeadCapturedRef.current = true;
-            setShowLeadForm(false);
-            setCapturedLeadData({ name, email, phone });
-            setThankYouVariant("submitted");
-            setChatOutcome("LEAD_CAPTURED");
-            setChatEnded(true);
-        } catch (err) {
-            setLeadFormError(err.message);
-        } finally {
-            setLeadFormLoading(false);
-        }
-    };
-
-    const handleLeadFormSkip = () => {
-        setShowLeadForm(false);
-        setThankYouVariant("skipped");
         setChatEnded(true);
     };
 
@@ -323,7 +276,7 @@ export default function CustomerChatPage() {
     // ── Render ────────────────────────────────────────────────────────────────
 
     return (
-        <div className="min-h-screen h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-900 flex items-start sm:items-center justify-center px-0 sm:px-4 py-0 sm:py-8 relative">
+        <div className="min-h-[100dvh] h-[100dvh] overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-900 flex items-start sm:items-center justify-center px-0 sm:px-4 py-0 sm:py-8 relative">
 
             {/* Theme toggle */}
             <div className="absolute top-5 right-6 z-10">
@@ -336,25 +289,22 @@ export default function CustomerChatPage() {
                 </button>
             </div>
 
-            <div className="w-full sm:max-w-md h-screen sm:h-auto">
-                <div className="bg-white dark:bg-gray-900 sm:rounded-3xl shadow-xl shadow-gray-200/60 dark:shadow-gray-950/60 border-0 sm:border border-gray-100 dark:border-gray-800 overflow-hidden flex flex-col h-full sm:h-[600px]">
+            <div className="w-full sm:max-w-md h-[100dvh] sm:h-auto">
+                <div className="bg-white dark:bg-gray-900 sm:rounded-3xl shadow-xl shadow-gray-200/60 dark:shadow-gray-950/60 border-0 sm:border border-gray-100 dark:border-gray-800 overflow-hidden flex flex-col h-full sm:h-[650px] max-h-[100dvh]">
 
                     {/* Header */}
                     <div className="px-7 pt-6 pb-5 border-b border-gray-100 dark:border-gray-800 shrink-0">
-                        <button
-                            onClick={handleBack}
-                            className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors mb-3"
-                        >
-                            <ArrowLeft size={13} />
-                            Back to Portal
-                        </button>
-                        <Wordmark />
-                        <div className="mt-3 flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0">
-                                <span className="text-base font-black text-blue-600 dark:text-blue-400">
-                                    {(businessName || "B").charAt(0).toUpperCase()}
-                                </span>
-                            </div>
+                        <div className="flex items-center justify-between">
+                            <button
+                                onClick={handleBack}
+                                className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors mb-3"
+                            >
+                                <ArrowLeft size={13} />
+                                Back to Portal
+                            </button>
+                        </div>
+                        <div className="mt-1 flex items-center gap-3">
+                            <BusinessAvatar businessName={businessName} logoUrl={sessionData?.businessData?.logoUrl} className="w-10 h-10 text-base" />
                             <div className="flex-1 min-w-0">
                                 <p className="text-sm font-bold text-gray-900 dark:text-white leading-tight truncate">{businessName}</p>
                                 <div className="flex items-center gap-1.5 mt-0.5">
@@ -367,7 +317,7 @@ export default function CustomerChatPage() {
                     </div>
 
                     {/* Message list — scrollable, custom scrollbar */}
-                    <div className="flex-1 overflow-y-auto portal-scrollbar px-5 py-4 space-y-3">
+                    <div className="flex-1 overflow-y-auto portal-scrollbar px-5 py-4 space-y-4" aria-live="polite">
                         <div className="flex items-center gap-3 pb-1">
                             <div className="flex-1 h-px bg-gray-100 dark:bg-gray-800" />
                             <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-600 uppercase tracking-wide shrink-0">Chat started</span>
@@ -393,12 +343,13 @@ export default function CustomerChatPage() {
                     <div className="shrink-0 border-t border-gray-100 dark:border-gray-800 px-4 py-4">
                         <form onSubmit={handleSend} className="flex items-center gap-2">
                             <input
+                                ref={inputRef}
                                 type="text"
                                 value={inputText}
                                 onChange={(e) => setInputText(e.target.value)}
                                 onKeyDown={handleKeyDown}
                                 placeholder={chatEscalated ? "Our team will follow up shortly…" : "Ask a question…"}
-                                disabled={chatLoading || chatEscalated}
+                                disabled={chatEscalated}
                                 className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-gray-50 dark:bg-gray-800 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition disabled:opacity-50"
                             />
                             <button
@@ -423,40 +374,38 @@ export default function CustomerChatPage() {
                 </div>
             </div>
 
-            {/* Follow-up prompt — shown before lead form */}
-            {showFollowUpPrompt && !chatEnded && !showLeadForm && (
-                <FollowUpPrompt
+            {/* End of Chat Screen */}
+            {chatEnded && !feedbackSubmitted && (
+                <FollowUpScreen
                     businessName={businessName}
-                    mode="chat"
-                    onYes={handleFollowUpYes}
-                    onNo={handleFollowUpNo}
-                />
-            )}
-
-            {/* Lead capture form */}
-            {showLeadForm && !chatEnded && (
-                <LeadCaptureForm
-                    businessName={businessName}
-                    onSubmit={handleLeadFormSubmit}
-                    onSkip={handleLeadFormSkip}
-                    loading={leadFormLoading}
-                    error={leadFormError}
-                />
-            )}
-
-            {/* Post-chat outcome screen */}
-            {chatEnded && (
-                <PostConvOverlay
-                    mode="chat"
-                    businessName={businessName}
-                    website={website}
-                    thankYouVariant={thankYouVariant}
-                    outcome={chatOutcome}
-                    durationSeconds={null}
-                    capturedLeadData={capturedLeadData}
-                    onLeaveDetails={() => { setChatEnded(false); setThankYouVariant(null); setShowLeadForm(true); }}
-                    onRetry={handleRetry}
-                    onDone={handleDone}
+                    logoUrl={sessionData?.businessData?.logoUrl}
+                    loading={feedbackLoading}
+                    error={feedbackError}
+                    onSubmit={async (data) => {
+                        setFeedbackLoading(true);
+                        setFeedbackError(null);
+                        try {
+                            const res = await fetch(`${API_BASE_URL}/portal/follow-up`, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    conversationToken: token,
+                                    conversationId,
+                                    ...data
+                                })
+                            });
+                            if (!res.ok) throw new Error("Failed to submit feedback");
+                            setFeedbackSubmitted(true);
+                            handleDone();
+                        } catch (err) {
+                            setFeedbackError(err.message);
+                            setFeedbackLoading(false);
+                        }
+                    }}
+                    onSkip={() => {
+                        setFeedbackSubmitted(true);
+                        handleDone();
+                    }}
                 />
             )}
         </div>

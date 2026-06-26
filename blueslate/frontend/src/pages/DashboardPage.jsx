@@ -12,8 +12,12 @@ import {
     Copy,
     Check,
     Plus,
+    ChevronRight,
+    PlayCircle,
+    Settings,
 } from "lucide-react";
 import { getLeads, getDashboardStats } from "../services/leadService";
+import { useNavigate } from "react-router-dom";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -39,71 +43,59 @@ function StatusBadge({ status }) {
 
 // ── kpi config ────────────────────────────────────────────────────────────────
 
-const KPI_CONFIG = [
+const PRIMARY_KPIS = [
     {
         key:        "totalLeads",
         label:      "Total Leads",
         Icon:       Users,
-        iconBg:     "bg-blue-100 dark:bg-blue-900/30",
+        iconBg:     "bg-blue-50 dark:bg-blue-900/20",
         iconCls:    "text-blue-600 dark:text-blue-400",
-        valueColor: "text-blue-600 dark:text-blue-400",
-    },
-    {
-        key:        "leadsToday",
-        label:      "Leads Today",
-        Icon:       CalendarDays,
-        iconBg:     "bg-violet-100 dark:bg-violet-900/30",
-        iconCls:    "text-violet-600 dark:text-violet-400",
-        valueColor: "text-violet-600 dark:text-violet-400",
-    },
-    {
-        key:        "newLeads",
-        label:      "New Leads",
-        Icon:       Sparkles,
-        iconBg:     "bg-slate-100 dark:bg-slate-800",
-        iconCls:    "text-slate-600 dark:text-slate-400",
-        valueColor: "text-slate-700 dark:text-slate-300",
-    },
-    {
-        key:        "contactedLeads",
-        label:      "Contacted",
-        Icon:       MessageSquare,
-        iconBg:     "bg-amber-100 dark:bg-amber-900/30",
-        iconCls:    "text-amber-600 dark:text-amber-400",
-        valueColor: "text-amber-600 dark:text-amber-400",
-    },
-    {
-        key:        "convertedLeads",
-        label:      "Converted",
-        Icon:       CheckCircle2,
-        iconBg:     "bg-green-100 dark:bg-green-900/30",
-        iconCls:    "text-green-600 dark:text-green-400",
-        valueColor: "text-green-600 dark:text-green-400",
-    },
-    {
-        key:        "emailsCaptured",
-        label:      "Emails Captured",
-        Icon:       Mail,
-        iconBg:     "bg-emerald-100 dark:bg-emerald-900/30",
-        iconCls:    "text-emerald-600 dark:text-emerald-400",
-        valueColor: "text-emerald-600 dark:text-emerald-400",
-    },
-    {
-        key:        "phonesCaptured",
-        label:      "Phones Captured",
-        Icon:       Phone,
-        iconBg:     "bg-purple-100 dark:bg-purple-900/30",
-        iconCls:    "text-purple-600 dark:text-purple-400",
-        valueColor: "text-purple-600 dark:text-purple-400",
+        valueColor: "text-gray-900 dark:text-white",
     },
     {
         key:        "_rate",
         label:      "Conversion Rate",
         Icon:       TrendingUp,
-        iconBg:     "bg-rose-100 dark:bg-rose-900/30",
-        iconCls:    "text-rose-600 dark:text-rose-400",
-        valueColor: "text-rose-600 dark:text-rose-400",
+        iconBg:     "bg-emerald-50 dark:bg-emerald-900/20",
+        iconCls:    "text-emerald-600 dark:text-emerald-400",
+        valueColor: "text-gray-900 dark:text-white",
         suffix:     "%",
+    },
+    {
+        key:        "contactedLeads",
+        label:      "Active Conversations",
+        Icon:       MessageSquare,
+        iconBg:     "bg-violet-50 dark:bg-violet-900/20",
+        iconCls:    "text-violet-600 dark:text-violet-400",
+        valueColor: "text-gray-900 dark:text-white",
+    },
+];
+
+const SECONDARY_KPIS = [
+    {
+        key:        "newLeads",
+        label:      "New Leads",
+        Icon:       Sparkles,
+    },
+    {
+        key:        "leadsToday",
+        label:      "Leads Today",
+        Icon:       CalendarDays,
+    },
+    {
+        key:        "convertedLeads",
+        label:      "Converted",
+        Icon:       CheckCircle2,
+    },
+    {
+        key:        "emailsCaptured",
+        label:      "Emails",
+        Icon:       Mail,
+    },
+    {
+        key:        "phonesCaptured",
+        label:      "Phones",
+        Icon:       Phone,
     },
 ];
 
@@ -115,6 +107,7 @@ export default function DashboardPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError]   = useState(null);
     const [copied, setCopied] = useState(null);
+    const navigate = useNavigate();
 
     useEffect(() => {
         Promise.all([getLeads(), getDashboardStats()])
@@ -138,7 +131,8 @@ export default function DashboardPage() {
         CONVERTED: leads.filter((l) => l.status === "CONVERTED").length,
     };
 
-    const handleCopy = (id, phone) => {
+    const handleCopy = (e, id, phone) => {
+        e.stopPropagation();
         if (!phone) return;
         navigator.clipboard.writeText(phone).then(() => {
             setCopied(id);
@@ -211,39 +205,73 @@ export default function DashboardPage() {
 
             {!loading && !error && stats && (
                 <>
-                    {/* KPI Cards */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                        {KPI_CONFIG.map((card) => (
+                    {/* Primary KPI Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+                        {PRIMARY_KPIS.map((card) => (
                             <div
                                 key={card.key}
-                                className="group bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm px-5 py-5 flex flex-col gap-3 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+                                className="group bg-white dark:bg-gray-900/60 rounded-[20px] border border-gray-100 dark:border-gray-800 shadow-sm px-6 py-6 flex flex-col hover:shadow-md hover:border-gray-200 dark:hover:border-gray-700 transition-all duration-300"
                             >
-                                <div className={`w-9 h-9 rounded-xl ${card.iconBg} flex items-center justify-center shrink-0`}>
-                                    <card.Icon size={18} className={card.iconCls} />
+                                <div className="flex items-center gap-3 mb-5">
+                                    <div className={`w-10 h-10 rounded-xl ${card.iconBg} flex items-center justify-center shrink-0`}>
+                                        <card.Icon size={18} className={card.iconCls} />
+                                    </div>
+                                    <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 tracking-tight">
+                                        {card.label}
+                                    </h3>
                                 </div>
                                 <div>
-                                    <p className={`text-2xl sm:text-3xl font-bold leading-none ${card.valueColor}`}>
+                                    <p className={`text-4xl font-extrabold tracking-tight ${card.valueColor}`}>
                                         {getKpiValue(card.key)}{card.suffix ?? ""}
-                                    </p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium mt-1.5 leading-snug">
-                                        {card.label}
                                     </p>
                                 </div>
                             </div>
                         ))}
                     </div>
 
+                    {/* Secondary KPI Cards */}
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4 mt-6">
+                        {SECONDARY_KPIS.map((card) => (
+                            <div
+                                key={card.key}
+                                className="bg-gray-50/50 dark:bg-gray-800/30 rounded-2xl border border-gray-100 dark:border-gray-800/60 px-4 py-3.5 flex flex-col justify-between"
+                            >
+                                <div className="flex items-center gap-2 mb-2 text-gray-500 dark:text-gray-400">
+                                    <card.Icon size={14} className="opacity-70" />
+                                    <span className="text-xs font-medium">{card.label}</span>
+                                </div>
+                                <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                                    {getKpiValue(card.key)}{card.suffix ?? ""}
+                                </p>
+                            </div>
+                        ))}
+                    </div>
+
                     {/* Empty state */}
                     {leads.length === 0 && (
-                        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 shadow-sm px-8 py-16 flex flex-col items-center text-center gap-4">
-                            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-blue-900/30 dark:to-indigo-900/30 flex items-center justify-center shadow-inner">
-                                <Users size={36} className="text-blue-400 dark:text-blue-500" />
+                        <div className="bg-white dark:bg-gray-900/60 rounded-[24px] border border-gray-100 dark:border-gray-800 shadow-sm px-8 py-20 flex flex-col items-center text-center max-w-3xl mx-auto my-10">
+                            <div className="w-24 h-24 rounded-[28px] bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 flex items-center justify-center mb-6 shadow-inner ring-1 ring-gray-900/5 dark:ring-white/5">
+                                <Sparkles size={40} className="text-blue-500 dark:text-blue-400" />
                             </div>
-                            <div>
-                                <h3 className="text-base font-semibold text-gray-900 dark:text-white">No Leads Yet</h3>
-                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1.5 max-w-xs leading-relaxed">
-                                    Your AI receptionist is active. Customer calls, chats, transcripts and leads will appear automatically.
-                                </p>
+                            <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">No leads yet</h3>
+                            <p className="text-base text-gray-500 dark:text-gray-400 max-w-md leading-relaxed mb-8">
+                                Your AI receptionist is ready. Start receiving conversations and your leads will automatically appear here.
+                            </p>
+                            <div className="flex items-center gap-4">
+                                <Link
+                                    to="/demo"
+                                    className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-semibold shadow-md shadow-gray-900/10 hover:shadow-lg hover:-translate-y-0.5 transition-all"
+                                >
+                                    <PlayCircle size={18} />
+                                    Test Customer Portal
+                                </Link>
+                                <Link
+                                    to="/settings"
+                                    className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                                >
+                                    <Settings size={18} />
+                                    Go to Settings
+                                </Link>
                             </div>
                         </div>
                     )}
@@ -273,75 +301,80 @@ export default function DashboardPage() {
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-sm min-w-[600px]">
                                         <thead>
-                                            <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/50">
-                                                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Name</th>
-                                                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Email</th>
-                                                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Phone</th>
-                                                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Status</th>
-                                                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Date</th>
-                                                <th className="px-5 py-3" />
+                                            <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50/40 dark:bg-gray-800/20">
+                                                <th className="text-left px-6 py-3.5 text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Name</th>
+                                                <th className="text-left px-6 py-3.5 text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Email</th>
+                                                <th className="text-left px-6 py-3.5 text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Phone</th>
+                                                <th className="text-left px-6 py-3.5 text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Status</th>
+                                                <th className="text-left px-6 py-3.5 text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Date</th>
+                                                <th className="px-6 py-3.5" />
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                                        <tbody className="divide-y divide-gray-50 dark:divide-gray-800/60">
                                             {recentLeads.map((lead) => (
-                                                <tr key={lead.id} className="hover:bg-blue-50/40 dark:hover:bg-blue-900/10 transition-colors">
-                                                    <td className="px-5 py-3.5">
+                                                <tr 
+                                                    key={lead.id} 
+                                                    onClick={() => navigate(`/leads/${lead.id}`)}
+                                                    className="group hover:bg-gray-50/80 dark:hover:bg-gray-800/40 transition-colors cursor-pointer"
+                                                >
+                                                    <td className="px-6 py-4">
                                                         {lead.name ? (
-                                                            <div className="flex items-center gap-2.5">
-                                                                <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-100 to-blue-50 dark:from-blue-900/40 dark:to-blue-800/40 border border-blue-200/50 dark:border-blue-700/50 flex items-center justify-center shrink-0">
                                                                     <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
                                                                         {lead.name.charAt(0).toUpperCase()}
                                                                     </span>
                                                                 </div>
-                                                                <span className="font-medium text-gray-800 dark:text-gray-200 truncate max-w-[100px]">
+                                                                <span className="font-semibold text-gray-900 dark:text-gray-100 truncate max-w-[140px]">
                                                                     {lead.name}
                                                                 </span>
                                                             </div>
                                                         ) : (
-                                                            <span className="text-gray-300 dark:text-gray-600 text-xs">—</span>
+                                                            <span className="text-gray-400 dark:text-gray-600 font-medium">—</span>
                                                         )}
                                                     </td>
-                                                    <td className="px-5 py-3.5">
-                                                        <span className="text-gray-600 dark:text-gray-400 truncate max-w-[160px] block">
-                                                            {lead.email ?? <span className="text-gray-300 dark:text-gray-600">—</span>}
+                                                    <td className="px-6 py-4">
+                                                        <span className="text-gray-600 dark:text-gray-400 truncate max-w-[180px] block font-medium">
+                                                            {lead.email ?? <span className="text-gray-400 dark:text-gray-600">—</span>}
                                                         </span>
                                                     </td>
-                                                    <td className="px-5 py-3.5 whitespace-nowrap text-gray-600 dark:text-gray-400">
-                                                        {lead.phone ?? <span className="text-gray-300 dark:text-gray-600">—</span>}
+                                                    <td className="px-6 py-4 whitespace-nowrap text-gray-600 dark:text-gray-400 font-medium">
+                                                        {lead.phone ?? <span className="text-gray-400 dark:text-gray-600">—</span>}
                                                     </td>
-                                                    <td className="px-5 py-3.5">
+                                                    <td className="px-6 py-4">
                                                         <StatusBadge status={lead.status} />
                                                     </td>
-                                                    <td className="px-5 py-3.5 whitespace-nowrap text-xs text-gray-400 dark:text-gray-500">
+                                                    <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400 font-medium">
                                                         {fmt(lead.createdAt)}
                                                     </td>
-                                                    <td className="px-4 py-3.5">
-                                                        <div className="flex items-center gap-1.5 justify-end">
+                                                    <td className="px-6 py-4">
+                                                        <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                                                             {lead.phone && (
                                                                 <button
-                                                                    onClick={() => handleCopy(lead.id, lead.phone)}
-                                                                    title="Copy phone number"
-                                                                    className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all ${
-                                                                        copied === lead.id
-                                                                            ? "bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400"
-                                                                            : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
-                                                                    }`}
+                                                                    onClick={(e) => { e.stopPropagation(); window.location.href = `tel:${lead.phone}`; }}
+                                                                    title="Call"
+                                                                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
                                                                 >
-                                                                    {copied === lead.id
-                                                                        ? <Check size={13} />
-                                                                        : <Copy size={13} />
-                                                                    }
+                                                                    <Phone size={14} />
                                                                 </button>
                                                             )}
                                                             {lead.email && (
                                                                 <button
-                                                                    onClick={() => { window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(lead.email)}`, "_blank", "noopener,noreferrer"); }}
+                                                                    onClick={(e) => { e.stopPropagation(); window.open(`mailto:${lead.email}`, "_blank"); }}
                                                                     title={`Email ${lead.email}`}
-                                                                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 hover:text-blue-600 dark:hover:text-blue-400 transition-all"
+                                                                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
                                                                 >
-                                                                    <Mail size={13} />
+                                                                    <Mail size={14} />
                                                                 </button>
                                                             )}
+                                                            <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1" />
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); navigate(`/leads/${lead.id}`); }}
+                                                                className="flex items-center gap-1 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:white px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                                            >
+                                                                View
+                                                                <ChevronRight size={14} />
+                                                            </button>
                                                         </div>
                                                     </td>
                                                 </tr>

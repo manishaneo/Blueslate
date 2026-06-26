@@ -1,6 +1,8 @@
 import jwt from "jsonwebtoken";
 import { lookupBusiness, portalChat, portalFinalizeConversation, portalCreateLead } from "../services/portal.service.js";
 import { initiateVapiOutboundCall } from "../services/outboundCall.service.js";
+import { triggerEscalation } from "../services/escalation.service.js";
+import prisma from "../prismaClient.js";
 
 // Strip all non-digit characters and normalise to E.164.
 // Handles common US formats: 10-digit, 1XXXXXXXXXX, and pre-formatted +1XXXXXXXXXX.
@@ -140,6 +142,98 @@ export const handlePortalFinalize = async (req, res, next) => {
         );
 
         res.json({ success: true, data: result });
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const handleFollowUp = async (req, res, next) => {
+    try {
+        const { conversationToken, rating, resolvedStatus, wantsHumanContact, email, phone, comments, conversationId } = req.body;
+
+        if (!conversationToken) {
+            return res.status(400).json({ success: false, message: "Session token is required." });
+        }
+
+        let payload;
+        try {
+            payload = jwt.verify(conversationToken, process.env.JWT_SECRET);
+        } catch {
+            return res.status(401).json({ success: false, message: "Invalid session token." });
+        }
+
+        const businessId = payload.businessId;
+
+        const feedback = await prisma.customerFeedback.create({
+            data: {
+                conversationId, 
+                rating: rating || null,
+                resolvedStatus: resolvedStatus === true,
+                wantsHumanContact: wantsHumanContact === true,
+                comments: comments || null
+            }
+        });
+
+        if (wantsHumanContact) {
+            if (!email) {
+                return res.status(400).json({ success: false, message: "Email is required for human contact." });
+            }
+
+            const request = await triggerEscalation({
+                businessId,
+                conversationId,
+                requestType: "CALLBACK_REQUEST",
+                aiSummary: `Customer requested follow-up. Rating: ${rating}/5, Resolved: ${resolvedStatus}`,
+                aiReason: comments || "Customer wants human contact.",
+                suggestedAction: "Schedule a meeting with the customer.",
+                snapshotEmail: email,
+                snapshotPhone: phone,
+                activities: [
+                    { type: "SYSTEM", description: "Customer requested human follow-up" }
+                ]
+            });
+
+            await prisma.customerFeedback.update({
+                where: { id: feedback.id },
+                data: { requestId: request.id }
+            });
+        }
+
+        res.json({ success: true, data: { feedbackId: feedback.id } });
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const handleCallStatus = async (req, res, next) => {
+    try {
+        const { callId } = req.query;
+        if (!callId) {
+            return res.status(400).json({ success: false, message: "callId is required." });
+        }
+
+        const vapiConv = await prisma.conversation.findFirst({
+            where: {
+                metadata: {
+                    path: ["vapiCallId"],
+                    equals: callId,
+                }
+            },
+            select: { id: true }
+        });
+
+        if (vapiConv) {
+            return res.json({ success: true, isEnded: true, status: 'completed' });
+        }
+
+        const callRecord = await prisma.call.findUnique({
+            where: { callSid: callId },
+            select: { status: true }
+        });
+
+        const isEnded = callRecord && ["completed", "customer-ended", "assistant-ended", "failed", "busy", "no-answer", "canceled"].includes(callRecord.status);
+
+        res.json({ success: true, isEnded, status: callRecord?.status || 'initiated' });
     } catch (err) {
         next(err);
     }

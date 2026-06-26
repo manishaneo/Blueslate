@@ -27,8 +27,10 @@ import CustomerCallPage from "./pages/CustomerCallPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DisabledBusinessPage from "./pages/DisabledBusinessPage";
 import DemoPage from "./pages/DemoPage";
+import CustomerInboxPage from "./pages/CustomerInboxPage";
+import RequestDetailsPage from "./pages/RequestDetailsPage";
 
-const ADMIN_PATHS = ["/dashboard", "/leads", "/conversations", "/call-history", "/analytics", "/knowledge-base", "/settings", "/test-ai", "/app-admin"];
+const ADMIN_PATHS = ["/dashboard", "/inbox", "/leads", "/conversations", "/call-history", "/analytics", "/knowledge-base", "/settings", "/test-ai", "/app-admin"];
 // Pages that manage their own inline theme toggle — suppress the global floating button
 const NO_FLOAT_TOGGLE = new Set(["/", "/login", "/admin-login", "/join", "/business-setup", "/add-business", "/customer", "/disabled", "/demo", "/forgot-password", "/reset-password"]);
 
@@ -77,6 +79,8 @@ function App() {
                     <Route path="/add-business" element={<AddBusinessPage />} />
                     <Route element={<AdminLayout />}>
                         <Route path="/dashboard" element={<DashboardPage />} />
+                        <Route path="/inbox" element={<CustomerInboxPage />} />
+                        <Route path="/inbox/:id" element={<RequestDetailsPage />} />
                         <Route path="/leads" element={<LeadsPage />} />
                         <Route path="/leads/:leadId" element={<LeadDetailsPage />} />
                         <Route path="/conversations" element={<ConversationsPage />} />

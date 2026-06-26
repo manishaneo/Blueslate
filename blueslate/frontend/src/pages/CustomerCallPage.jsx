@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, Phone, CheckCircle2, Moon, Sun, Loader2 } from "lucide-react";
 import { useTheme } from "../hooks/useTheme";
+import { BusinessAvatar, PoweredBy, FollowUpScreen } from "../components/CustomerPortalComponents";
 import { API_BASE_URL } from "../utils/api";
 
 // ── Animated trust-check row (shown on the "calling you now" screen) ──────────
@@ -50,6 +51,9 @@ export default function CustomerCallPage() {
     const [loading,  setLoading]  = useState(false);
     const [error,    setError]    = useState(null);
     const [calling,  setCalling]  = useState(false); // "we're calling you now" screen
+    const [callId,   setCallId]   = useState(null);
+    const [callEnded, setCallEnded] = useState(false);
+    const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
     // ── Navigation ────────────────────────────────────────────────────────────
     const handleBack = useCallback(() => {
@@ -59,6 +63,25 @@ export default function CustomerCallPage() {
     const handleDone = useCallback(() => {
         navigate("/customer", { state: { step: 2, businessName, receptionistName, website, token } });
     }, [token, businessName, receptionistName, website, navigate]);
+
+    // ── Call polling ──────────────────────────────────────────────────────────
+    useEffect(() => {
+        if (!calling || !callId || callEnded) return;
+
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`${API_BASE_URL}/portal/call-status/${token}?callId=${callId}`);
+                const data = await res.json();
+                if (data.isEnded) {
+                    setCallEnded(true);
+                }
+            } catch (err) {
+                console.error("Poll error:", err);
+            }
+        }, 3000);
+
+        return () => clearInterval(interval);
+    }, [calling, callId, callEnded, token]);
 
     // ── Call Me ───────────────────────────────────────────────────────────────
     const handleSubmit = async (e) => {
@@ -86,6 +109,7 @@ export default function CustomerCallPage() {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.message ?? "Something went wrong. Please try again.");
+            setCallId(data.data?.callId);
             setCalling(true);
         } catch (err) {
             setError(err.message);
@@ -96,10 +120,46 @@ export default function CustomerCallPage() {
 
     if (!sessionData) return null;
 
+    // ── Follow-Up Screen ──────────────────────────────────────────────────────
+    if (callEnded && !feedbackSubmitted) {
+        return (
+            <FollowUpScreen
+                businessName={businessName}
+                logoUrl={sessionData?.businessData?.logoUrl}
+                loading={loading}
+                error={error}
+                onSubmit={async (data) => {
+                    setLoading(true);
+                    setError(null);
+                    try {
+                        const res = await fetch(`${API_BASE_URL}/portal/follow-up`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                conversationToken: token,
+                                ...data
+                            })
+                        });
+                        if (!res.ok) throw new Error("Failed to submit feedback");
+                        setFeedbackSubmitted(true);
+                        handleDone();
+                    } catch (err) {
+                        setError(err.message);
+                        setLoading(false);
+                    }
+                }}
+                onSkip={() => {
+                    setFeedbackSubmitted(true);
+                    handleDone();
+                }}
+            />
+        );
+    }
+
     // ── "We're calling you now" screen ────────────────────────────────────────
     if (calling) {
         return (
-            <div className="fixed inset-0 z-50 bg-gray-950 flex flex-col px-8">
+            <div className="fixed inset-0 z-50 bg-gray-950 flex flex-col px-8 min-h-[100dvh]">
                 {/* Top bar */}
                 <div className="pt-5 pb-2 shrink-0 flex items-center justify-between">
                     <button
@@ -119,12 +179,10 @@ export default function CustomerCallPage() {
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 flex flex-col items-center justify-center">
+                <div className="flex-1 flex flex-col items-center justify-center pb-12">
                     {/* Business avatar */}
-                    <div className="w-16 h-16 rounded-2xl bg-blue-600/15 border border-blue-500/25 flex items-center justify-center mb-6">
-                        <span className="text-2xl font-black text-blue-400">
-                            {(businessName || "B").charAt(0).toUpperCase()}
-                        </span>
+                    <div className="mb-6">
+                        <BusinessAvatar businessName={businessName} logoUrl={sessionData?.businessData?.logoUrl} className="w-16 h-16 text-2xl" />
                     </div>
 
                     <p className="text-white text-xl font-bold mb-1 text-center">Your phone will ring shortly</p>
@@ -160,7 +218,7 @@ export default function CustomerCallPage() {
 
     // ── Phone number form ─────────────────────────────────────────────────────
     return (
-        <div className="fixed inset-0 z-50 bg-gray-950 flex flex-col px-8">
+        <div className="fixed inset-0 z-50 bg-gray-950 flex flex-col px-8 min-h-[100dvh]">
             {/* Top bar */}
             <div className="pt-5 pb-2 shrink-0 flex items-center justify-between">
                 <button
@@ -180,12 +238,10 @@ export default function CustomerCallPage() {
             </div>
 
             {/* Form */}
-            <div className="flex-1 flex flex-col items-center justify-center">
+            <div className="flex-1 flex flex-col items-center justify-center pb-12">
                 {/* Business avatar */}
-                <div className="w-16 h-16 rounded-2xl bg-blue-600/15 border border-blue-500/25 flex items-center justify-center mb-6">
-                    <span className="text-2xl font-black text-blue-400">
-                        {(businessName || "B").charAt(0).toUpperCase()}
-                    </span>
+                <div className="mb-6">
+                    <BusinessAvatar businessName={businessName} logoUrl={sessionData?.businessData?.logoUrl} className="w-16 h-16 text-2xl" />
                 </div>
 
                 <p className="text-white text-xl font-bold mb-1 text-center">Talk to {receptionistName}</p>
@@ -237,6 +293,10 @@ export default function CustomerCallPage() {
                         Standard call rates apply. The AI receptionist will call you within seconds.
                     </p>
                 </form>
+                
+                <div className="absolute bottom-8">
+                    <PoweredBy />
+                </div>
             </div>
         </div>
     );

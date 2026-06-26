@@ -3,6 +3,8 @@ import { askGemini } from "../services/ai.service.js";
 import { generateGroqAnswer, generateConversationSummary } from "../services/groq.service.js";
 import { extractLeadData }             from "../services/leadExtraction.service.js";
 import { createLead, findLeadByEmail, findLeadByPhone } from "../services/lead.service.js";
+import { detectIntent } from "../services/intent.service.js";
+import { triggerEscalation } from "../services/escalation.service.js";
 
 /**
  * POST /api/vapi/tool
@@ -453,6 +455,18 @@ export async function handleVapiWebhook(req, res) {
                 if (existingInCorrect) {
                     capturedLeadId = existingInCorrect.id;
                     console.log("[VAPI WEBHOOK] lead already in correct context:", email ?? phone);
+                    
+                    if (phone && !existingInCorrect.phone) {
+                        try {
+                            await prisma.lead.update({
+                                where: { id: capturedLeadId },
+                                data: { phone }
+                            });
+                            console.log("[VAPI WEBHOOK] updated lead phone:", phone);
+                        } catch (e) {
+                            console.error("[VAPI WEBHOOK] failed to update lead phone:", e.message);
+                        }
+                    }
                 } else {
                     // (b) Global search — look for a lead created in the wrong context.
                     // This handles the case where _resolveBusinessContext fell back to
@@ -474,9 +488,12 @@ export async function handleVapiWebhook(req, res) {
                             // Lead is in a context with no business owner (demo fallback) — migrate.
                             console.log("[VAPI WEBHOOK] migrating misrouted lead from demo context →",
                                 webhookBusinessContext.id, "| id:", existingAnywhere.id);
+                            const updateData = { businessContextId: webhookBusinessContext.id };
+                            if (phone && !existingAnywhere.phone) updateData.phone = phone;
+
                             await prisma.lead.update({
                                 where: { id: existingAnywhere.id },
-                                data:  { businessContextId: webhookBusinessContext.id },
+                                data:  updateData,
                             });
                             capturedLeadId = existingAnywhere.id;
                         } else {
@@ -570,18 +587,73 @@ export async function handleVapiWebhook(req, res) {
                 });
                 console.log("[VAPI WEBHOOK] conversations row created for call:", vapiCallId);
 
-                // Fire-and-forget summary — same pattern as chat.service.js and portal.service.js.
-                // Does not block the 200 response; failures are silently swallowed.
-                generateConversationSummary(transcript, businessContext.title ?? "")
-                    .then((summary) => {
-                        if (summary) {
-                            return prisma.conversation.update({
-                                where: { id: conv.id },
-                                data:  { summary },
-                            });
+                let finalSummary = null;
+                try {
+                    finalSummary = await generateConversationSummary(transcript, businessContext.title ?? "");
+                    if (finalSummary) {
+                        await prisma.conversation.update({
+                            where: { id: conv.id },
+                            data:  { summary: finalSummary },
+                        });
+                    }
+                } catch (e) {
+                    console.error("[VAPI WEBHOOK] failed to generate summary:", e);
+                }
+
+                // Milestone 3: Voice Call Escalation
+                // Scan the user turns for escalation intents
+                let highestIntent = null;
+                for (const turn of conversationTurns) {
+                    if (turn.role !== "user" && turn.role !== "caller") continue;
+                    const text = (turn.message ?? turn.content ?? "").trim();
+                    if (!text) continue;
+                    
+                    const intentData = detectIntent(text);
+                    if (intentData.requiresHuman) {
+                        if (!highestIntent || intentData.confidence > highestIntent.confidence) {
+                            highestIntent = { ...intentData, text };
                         }
-                    })
-                    .catch(() => {});
+                    }
+                }
+
+                // Fallback: If no intent found from user turns, scan the AI summary for keywords!
+                if (!highestIntent && finalSummary) {
+                    const summaryIntent = detectIntent(finalSummary);
+                    if (summaryIntent.requiresHuman) {
+                        highestIntent = { ...summaryIntent, text: finalSummary };
+                    }
+                }
+
+                if (highestIntent || (status !== "completed" && status !== "customer-ended" && status !== "assistant-ended")) {
+                    let reqType = "ESCALATION";
+                    let summary = "Voice call ended unresolved or with low confidence.";
+                    let reason = "The AI voice call ended abnormally.";
+                    
+                    if (highestIntent) {
+                        if (highestIntent.intent === "complaint") reqType = "COMPLAINT";
+                        else if (highestIntent.intent === "speak_to_human") reqType = "CALLBACK_REQUEST";
+                        summary = `AI detected ${highestIntent.intent} with confidence ${highestIntent.confidence}`;
+                        reason = highestIntent.text;
+                    }
+
+                    try {
+                        await triggerEscalation({
+                            businessId: businessContext.businessId,
+                            conversationId: conv.id,
+                            leadId: capturedLeadId ?? undefined,
+                            requestType: reqType,
+                            aiSummary: summary,
+                            aiReason: reason,
+                            suggestedAction: "Review the voice call transcript and follow up.",
+                            activities: [
+                                { type: "SYSTEM", description: "Voice Call Completed" },
+                                { type: "CREATED", description: "AI Escalated Voice Call" }
+                            ]
+                        });
+                    } catch (escErr) {
+                        console.error("[VAPI WEBHOOK] triggerEscalation FAILED:", escErr.message);
+                    }
+                }
                 } // end conversationTurns.length > 0
             }
         } else {

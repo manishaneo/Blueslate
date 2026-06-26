@@ -3,7 +3,9 @@ import { handleLookup,
          handlePortalChat,
          handlePortalFinalize,
          handlePortalLeadCreate,
-         handleCallMe } from "../controllers/portal.controller.js";
+         handleCallMe,
+         handleFollowUp,
+         handleCallStatus } from "../controllers/portal.controller.js";
 import {
     portalLookupLimiter,
     portalChatIpLimiter,
@@ -32,5 +34,11 @@ router.post  ("/leads",                    portalLeadsLimiter,                  
 
 // POST /api/portal/call-me          — 5 req / 10 min per IP (each request dials a real phone)
 router.post  ("/call-me",                  portalCallMeLimiter,                                handleCallMe);
+
+// POST /api/portal/follow-up
+router.post  ("/follow-up",                portalLeadsLimiter,                                 handleFollowUp);
+
+// GET /api/portal/call-status/:token
+router.get   ("/call-status/:token",       portalLookupLimiter,                                handleCallStatus);
 
 export default router;

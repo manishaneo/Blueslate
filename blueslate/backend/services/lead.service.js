@@ -1,6 +1,7 @@
 import prisma from "../prismaClient.js";
 import { resolveActiveBusiness } from "../utils/resolveActiveBusiness.js";
 import { AppError }              from "../middleware/AppError.js";
+import { triggerEscalation }     from "./escalation.service.js";
 
 // Strips known country-code prefixes (+91 India, +1 US/CA) so that
 // "+917205672015" and "7205672015" both resolve to the same 10-digit form.
@@ -39,6 +40,7 @@ async function resolveContextIds(userId, activeBusinessId) {
 // Internal use only — caller must supply a server-resolved businessContextId.
 // Used by chat.service, which already resolves the context before calling this.
 export const createLead = async (data) => {
+    const businessContextId = data.businessContextId;
     const normalized = data.phone
         ? { ...data, phone: normalizePhone(data.phone) }
         : data;
@@ -46,6 +48,28 @@ export const createLead = async (data) => {
     try {
         const result = await prisma.lead.create({ data: normalized });
         console.log("[portal-debug] createLead succeeded | id:", result.id);
+
+        // Milestone 3: Automatically trigger NEW_LEAD escalation
+        try {
+            const context = await prisma.businessContext.findUnique({
+                where: { id: businessContextId },
+                select: { businessId: true }
+            });
+
+            if (context?.businessId) {
+                await triggerEscalation({
+                    businessId: context.businessId,
+                    leadId: result.id,
+                    requestType: "NEW_LEAD",
+                    aiSummary: "New customer lead captured.",
+                    suggestedAction: "Review customer details and follow up.",
+                    activities: [{ type: "CREATED", description: "Lead Created" }]
+                });
+            }
+        } catch (escErr) {
+            console.error("[portal-debug] createLead -> triggerEscalation FAILED:", escErr.message);
+        }
+
         return result;
     } catch (err) {
         console.error("[portal-debug] createLead FAILED (full error):", err);
