@@ -141,6 +141,7 @@ export default function CustomerCallPage() {
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
                                 conversationToken: token,
+                                callId: callId,
                                 ...data
                             })
                         });

@@ -149,7 +149,7 @@ export const handlePortalFinalize = async (req, res, next) => {
 
 export const handleFollowUp = async (req, res, next) => {
     try {
-        const { conversationToken, rating, resolvedStatus, wantsHumanContact, email, phone, comments, conversationId } = req.body;
+        let { conversationToken, rating, resolvedStatus, wantsHumanContact, email, phone, comments, conversationId, callId } = req.body;
 
         if (!conversationToken) {
             return res.status(400).json({ success: false, message: "Session token is required." });
@@ -164,15 +164,32 @@ export const handleFollowUp = async (req, res, next) => {
 
         const businessId = payload.businessId;
 
-        const feedback = await prisma.customerFeedback.create({
-            data: {
-                conversationId, 
-                rating: rating || null,
-                resolvedStatus: resolvedStatus === true,
-                wantsHumanContact: wantsHumanContact === true,
-                comments: comments || null
+        // For voice calls, we only have callId. We must wait for the VAPI webhook to create the conversation.
+        if (!conversationId && callId) {
+            for (let i = 0; i < 5; i++) {
+                const conv = await prisma.conversation.findFirst({
+                    where: { metadata: { path: ["vapiCallId"], equals: callId } }
+                });
+                if (conv) {
+                    conversationId = conv.id;
+                    break;
+                }
+                await new Promise(r => setTimeout(r, 1000));
             }
-        });
+        }
+
+        let feedback = null;
+        if (conversationId) {
+            feedback = await prisma.customerFeedback.create({
+                data: {
+                    conversationId, 
+                    rating: rating || null,
+                    resolvedStatus: resolvedStatus === true,
+                    wantsHumanContact: wantsHumanContact === true,
+                    comments: comments || null
+                }
+            });
+        }
 
         if (wantsHumanContact) {
             if (!email) {
@@ -181,9 +198,9 @@ export const handleFollowUp = async (req, res, next) => {
 
             const request = await triggerEscalation({
                 businessId,
-                conversationId,
+                conversationId: conversationId || undefined,
                 requestType: "CALLBACK_REQUEST",
-                aiSummary: `Customer requested follow-up. Rating: ${rating}/5, Resolved: ${resolvedStatus}`,
+                aiSummary: `Customer requested follow-up. Rating: ${rating || 'N/A'}/5, Resolved: ${resolvedStatus}`,
                 aiReason: comments || "Customer wants human contact.",
                 suggestedAction: "Schedule a meeting with the customer.",
                 snapshotEmail: email,
@@ -193,13 +210,15 @@ export const handleFollowUp = async (req, res, next) => {
                 ]
             });
 
-            await prisma.customerFeedback.update({
-                where: { id: feedback.id },
-                data: { requestId: request.id }
-            });
+            if (feedback) {
+                await prisma.customerFeedback.update({
+                    where: { id: feedback.id },
+                    data: { requestId: request.id }
+                });
+            }
         }
 
-        res.json({ success: true, data: { feedbackId: feedback.id } });
+        res.json({ success: true, data: { feedbackId: feedback?.id || null } });
     } catch (err) {
         next(err);
     }
