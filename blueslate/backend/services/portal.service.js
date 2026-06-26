@@ -14,7 +14,11 @@ const PORTAL_TOKEN_EXPIRY = "24h";
 // Intents that qualify for opportunity-lead capture even without contact info.
 // requiresHuman intents are handled via intentData.requiresHuman — listed here
 // are the non-escalation intents that still represent strong purchase/enrollment intent.
-const OPPORTUNITY_INTENTS = new Set(["pricing", "admissions", "trial_booking"]);
+const OPPORTUNITY_INTENTS = new Set([
+    "admission", "pricing", "fees", "quote", "purchase", "buy",
+    "enroll", "booking", "registration", "availability", 
+    "interested", "demo", "trial"
+]);
 
 // ── token helpers ─────────────────────────────────────────────────────────────
 
@@ -213,6 +217,7 @@ export async function portalChat(conversationToken, question, conversationId, so
     console.log("[portal-debug] portalChat | intent detected:", intentData.intent, "| requiresHuman:", intentData.requiresHuman, "| confidence:", intentData.confidence);
     let answer;
     let createdLeadId = null;
+    let snapshotContact = { name: null, email: null, phone: null };
 
     if (intentData.intent === "small_talk") {
         answer = getSmallTalkResponse(intentData, businessContext.title, bizSettings?.aiPersonaName ?? null);
@@ -223,37 +228,53 @@ export async function portalChat(conversationToken, question, conversationId, so
         try {
             const extracted = extractLeadData(question);
             const { name, email, phone, interest } = extracted;
+            snapshotContact = { name, email, phone };
+            
             console.log("[portal-debug] portalChat | raw question:", JSON.stringify(question));
             console.log("[portal-debug] portalChat | extractLeadData result:", JSON.stringify({ name, email, phone }));
             if (email || phone) {
                 if (conversation?.leadId) {
-                    console.log("[portal-debug] portalChat | conversation already has leadId:", conversation.leadId, "updating contact info.");
-                    await prisma.lead.update({
-                        where: { id: conversation.leadId },
-                        data: {
-                            ...(name ? { name } : {}),
-                            ...(email ? { email } : {}),
-                            ...(phone ? { phone } : {}),
-                            // Transition from NEEDS_CONTACT_INFO to NEW if we just got contact info
-                            status: "NEW"
+                    console.log("[portal-debug] portalChat | conversation already has leadId:", conversation.leadId, "evaluating contact info update.");
+                    const existingLead = await prisma.lead.findUnique({ where: { id: conversation.leadId } });
+                    if (existingLead) {
+                        const updateData = {};
+                        if (name && !existingLead.name) updateData.name = name;
+                        if (email && !existingLead.email) updateData.email = email;
+                        if (phone && !existingLead.phone) updateData.phone = phone;
+                        if (existingLead.status === "NEEDS_CONTACT_INFO" && (updateData.email || updateData.phone || existingLead.email || existingLead.phone)) {
+                            updateData.status = "NEW";
                         }
-                    });
-                    createdLeadId = conversation.leadId;
+                        
+                        if (Object.keys(updateData).length > 0) {
+                            await prisma.lead.update({
+                                where: { id: conversation.leadId },
+                                data: updateData
+                            });
+                            console.log("[portal-debug] portalChat | updated existing lead with new missing info.");
+                        } else {
+                            console.log("[portal-debug] portalChat | preserved existing lead info, differing details kept as snapshot.");
+                        }
+                        createdLeadId = conversation.leadId;
+                    }
                 } else {
                     console.log("[portal-debug] portalChat | email/phone found — checking dedup. businessContextId:", businessContextId);
                     const existing = email
                         ? await findLeadByEmail(email, [businessContextId])
                         : null;
-                    console.log("[portal-debug] portalChat | dedup result:", existing ? `existing id=${existing.id}` : "none");
-                    if (!existing) {
+                        
+                    const isSalesIntent = OPPORTUNITY_INTENTS.has(intentData.intent);
+                    
+                    if (existing) {
+                        createdLeadId = existing.id;
+                        console.log("[portal-debug] portalChat | using existing leadId:", createdLeadId);
+                    } else if (isSalesIntent) {
                         const payload = { businessContextId, name, email, phone, interest };
-                        console.log("[portal-debug] portalChat | calling createLead with:", JSON.stringify(payload));
+                        console.log("[portal-debug] portalChat | sales intent detected, calling createLead with:", JSON.stringify(payload));
                         const newLead = await createLead(payload);
                         createdLeadId = newLead?.id ?? null;
                         console.log("[portal-debug] portalChat | createLead succeeded — leadId:", createdLeadId);
                     } else {
-                        createdLeadId = existing.id;
-                        console.log("[portal-debug] portalChat | using existing leadId:", createdLeadId);
+                        console.log("[portal-debug] portalChat | support intent detected, skipping lead creation. Storing snapshot info.");
                     }
                 }
             } else {
@@ -382,6 +403,9 @@ export async function portalChat(conversationToken, question, conversationId, so
                 businessId,
                 conversationId: conversation.id,
                 leadId: leadId !== null ? leadId : undefined,
+                snapshotName: snapshotContact.name || undefined,
+                snapshotEmail: snapshotContact.email || undefined,
+                snapshotPhone: snapshotContact.phone || undefined,
                 requestType: reqType,
                 aiSummary: `AI detected ${intentData.intent} with confidence ${intentData.confidence}`,
                 aiReason: question,

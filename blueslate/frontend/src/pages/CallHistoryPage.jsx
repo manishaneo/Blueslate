@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
     PhoneCall,
     Users,
@@ -226,11 +227,13 @@ function TranscriptDrawer({ call, visible, onClose }) {
         });
     };
 
-    return (
-        <div className={`fixed inset-0 z-50 transition-opacity duration-300 ${visible ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+    if (typeof document === 'undefined') return null;
+
+    return createPortal(
+        <div className={`fixed inset-0 z-[100] transition-opacity duration-300 ${visible ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
             <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
 
-            <div className={`absolute right-0 top-0 h-full w-full sm:max-w-[500px] bg-white dark:bg-gray-900 shadow-2xl flex flex-col transition-transform duration-300 ease-out ${visible ? "translate-x-0" : "translate-x-full"}`}>
+            <div className={`absolute right-0 top-0 h-[100dvh] w-full sm:max-w-[500px] bg-white dark:bg-gray-900 shadow-2xl flex flex-col transition-transform duration-300 ease-out ${visible ? "translate-x-0" : "translate-x-full"}`}>
 
                 <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800 shrink-0">
                     <div className="flex items-center gap-2.5">
@@ -396,7 +399,8 @@ function TranscriptDrawer({ call, visible, onClose }) {
                     </div>
                 )}
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }
 

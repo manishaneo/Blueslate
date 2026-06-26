@@ -5,7 +5,11 @@ import ReactMarkdown from "react-markdown";
 import { useTheme } from "../hooks/useTheme";
 import { BusinessAvatar, FollowUpScreen } from "../components/CustomerPortalComponents";
 import { API_BASE_URL } from "../utils/api";
-const LEAD_CAPTURE_INTENTS = new Set(["trial_booking", "admissions", "pricing"]);
+const LEAD_CAPTURE_INTENTS = new Set([
+    "admission", "pricing", "fees", "quote", "purchase", "buy",
+    "enroll", "booking", "registration", "availability", 
+    "interested", "demo", "trial"
+]);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -107,9 +111,36 @@ export default function CustomerChatPage() {
         if (!sessionData) navigate("/customer", { replace: true });
     }, [sessionData, navigate]);
 
-    const businessName     = sessionData?.businessName     || "";
-    const receptionistName = sessionData?.receptionistName || "Virtual Receptionist";
+    const [businessName, setBusinessName]         = useState(sessionData?.businessName     || "");
+    const [receptionistName, setReceptionistName] = useState(sessionData?.receptionistName || "Virtual Receptionist");
     const website          = sessionData?.website          || "";
+
+    useEffect(() => {
+        if (!website) return;
+        fetch(`${API_BASE_URL}/portal/lookup`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ website })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success && data.data) {
+                if (data.data.receptionistName && data.data.receptionistName !== receptionistName) {
+                    setReceptionistName(data.data.receptionistName);
+                }
+                if (data.data.businessName && data.data.businessName !== businessName) {
+                    setBusinessName(data.data.businessName);
+                }
+                try {
+                    const currentSession = JSON.parse(sessionStorage.getItem(`portal_session_${token}`) || "{}");
+                    currentSession.receptionistName = data.data.receptionistName || currentSession.receptionistName;
+                    currentSession.businessName = data.data.businessName || currentSession.businessName;
+                    sessionStorage.setItem(`portal_session_${token}`, JSON.stringify(currentSession));
+                } catch { /* ignore */ }
+            }
+        })
+        .catch(() => {});
+    }, [website, token]);
 
     // ── Hydrate state from sessionStorage (refresh-safe) ─────────────────────
     const [persist] = useState(() => loadChatSession(token));

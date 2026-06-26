@@ -49,7 +49,7 @@ export const createLead = async (data) => {
         const result = await prisma.lead.create({ data: normalized });
         console.log("[portal-debug] createLead succeeded | id:", result.id);
 
-        // Milestone 3: Automatically trigger NEW_LEAD escalation
+        // Milestone 3: Automatically trigger NEW_LEAD notification (do not create an Inbox request)
         try {
             const context = await prisma.businessContext.findUnique({
                 where: { id: businessContextId },
@@ -57,17 +57,18 @@ export const createLead = async (data) => {
             });
 
             if (context?.businessId) {
-                await triggerEscalation({
-                    businessId: context.businessId,
-                    leadId: result.id,
-                    requestType: "NEW_LEAD",
-                    aiSummary: "New customer lead captured.",
-                    suggestedAction: "Review customer details and follow up.",
-                    activities: [{ type: "CREATED", description: "Lead Created" }]
+                await prisma.notification.create({
+                    data: {
+                        businessId: context.businessId,
+                        title: "New Lead Captured",
+                        description: `A new lead (${result.name || "Unknown"}) was captured via ${result.source || "interaction"}.`,
+                        notificationType: "NEW_LEAD",
+                        priority: "LOW"
+                    }
                 });
             }
-        } catch (escErr) {
-            console.error("[portal-debug] createLead -> triggerEscalation FAILED:", escErr.message);
+        } catch (notifErr) {
+            console.error("[portal-debug] createLead -> notification FAILED:", notifErr.message);
         }
 
         return result;

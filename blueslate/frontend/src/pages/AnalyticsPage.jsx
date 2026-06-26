@@ -1,964 +1,406 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import {
     Users,
     MessageSquare,
     CalendarDays,
     TrendingUp,
-    Globe,
-    Bot,
-    Phone,
     AlertTriangle,
+    BarChart3,
+    Clock,
+    CheckCircle,
+    Star,
+    Briefcase,
+    Lightbulb,
+    PhoneCall,
+    FileText,
+    Zap,
+    Bot
 } from "lucide-react";
-import { getAnalytics } from "../services/analyticsService";
+import { getAnalyticsDashboard } from "../services/analyticsService";
+import { generateInsights, generateRecommendations, calculateBusinessHealth } from "../utils/analyticsInsights";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from 'recharts';
 
-// ── date helpers ──────────────────────────────────────────────────────────────
-
-const fmtLong = (d) =>
-    new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-
-// Parse "YYYY-MM-DD" without UTC offset drift.
-const fmtShort = (iso) => {
-    const [y, m, d] = iso.split("-").map(Number);
-    return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const COLORS = {
+    blue: '#3b82f6',
+    green: '#22c55e',
+    amber: '#f59e0b',
+    red: '#ef4444',
+    purple: '#a855f7',
+    gray: '#6b7280'
 };
 
-// ── status badge ──────────────────────────────────────────────────────────────
+const PIE_COLORS = [COLORS.amber, COLORS.red, COLORS.purple, COLORS.blue];
 
-const STATUS_STYLES = {
-    NEW:       "bg-blue-50  text-blue-700  dark:bg-blue-900/30  dark:text-blue-300",
-    CONTACTED: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
-    CONVERTED: "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300",
-};
-
-function StatusBadge({ status }) {
-    const cls = STATUS_STYLES[status] ?? "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400";
-    return (
-        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>
-            {status ?? "—"}
-        </span>
-    );
-}
-
-// ── kpi config ────────────────────────────────────────────────────────────────
-
-const KPI_CONFIG = [
-    {
-        key:        "totalLeads",
-        label:      "Total Leads",
-        Icon:       Users,
-        iconBg:     "bg-blue-100 dark:bg-blue-900/30",
-        iconCls:    "text-blue-600 dark:text-blue-400",
-        valueColor: "text-blue-600 dark:text-blue-400",
-    },
-    {
-        key:        "totalConversations",
-        label:      "Total Conversations",
-        Icon:       MessageSquare,
-        iconBg:     "bg-violet-100 dark:bg-violet-900/30",
-        iconCls:    "text-violet-600 dark:text-violet-400",
-        valueColor: "text-violet-600 dark:text-violet-400",
-    },
-    {
-        key:        "leadsThisWeek",
-        label:      "Leads This Week",
-        Icon:       CalendarDays,
-        iconBg:     "bg-emerald-100 dark:bg-emerald-900/30",
-        iconCls:    "text-emerald-600 dark:text-emerald-400",
-        valueColor: "text-emerald-600 dark:text-emerald-400",
-    },
-    {
-        key:        "conversationsThisWeek",
-        label:      "Conversations This Week",
-        Icon:       TrendingUp,
-        iconBg:     "bg-amber-100 dark:bg-amber-900/30",
-        iconCls:    "text-amber-600 dark:text-amber-400",
-        valueColor: "text-amber-600 dark:text-amber-400",
-    },
-    {
-        key:        "escalatedConversations",
-        label:      "Escalated Conversations",
-        Icon:       AlertTriangle,
-        iconBg:     "bg-red-100 dark:bg-red-900/30",
-        iconCls:    "text-red-600 dark:text-red-400",
-        valueColor: "text-red-600 dark:text-red-400",
-    },
-];
-
-// ── donut chart ───────────────────────────────────────────────────────────────
-// Segments drawn with the stroke-dasharray technique.
-// Each <circle> paints one arc; the <g> is rotated -90° so arcs start at 12 o'clock.
-
-function DonutChart({ segments }) {
-    const total = segments.reduce((s, d) => s + d.value, 0);
-    const r     = 44;
-    const cx    = 56;
-    const cy    = 56;
-    const circ  = 2 * Math.PI * r;
-
-    let cumPct = 0;
-    const slices = segments.map((seg) => {
-        const pct  = total > 0 ? seg.value / total : 0;
-        const dash = pct * circ;
-        const off  = -cumPct * circ;   // negative = start further clockwise
-        cumPct += pct;
-        return { ...seg, dash, off };
-    });
+function MetricCard({ title, value, icon: Icon, color, trend }) {
+    const colorClasses = {
+        blue: "text-blue-600 bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400",
+        green: "text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400",
+        amber: "text-amber-600 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400",
+        red: "text-red-600 bg-red-100 dark:bg-red-900/30 dark:text-red-400",
+        purple: "text-purple-600 bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400",
+    };
 
     return (
-        <div className="flex items-center gap-5">
-            {/* SVG ring */}
-            <div className="relative w-28 h-28 shrink-0">
-                <svg viewBox="0 0 112 112" className="w-full h-full" aria-hidden="true">
-                    <g transform={`rotate(-90 ${cx} ${cy})`}>
-                        {total === 0 ? (
-                            <circle cx={cx} cy={cy} r={r}
-                                fill="none" strokeWidth="18" stroke="#e5e7eb"
-                            />
-                        ) : (
-                            slices.map((s, i) => (
-                                <circle key={i} cx={cx} cy={cy} r={r}
-                                    fill="none"
-                                    stroke={s.color}
-                                    strokeWidth="18"
-                                    strokeDasharray={`${s.dash} ${circ}`}
-                                    strokeDashoffset={s.off}
-                                />
-                            ))
-                        )}
-                    </g>
-                </svg>
-                {/* Centre label — HTML so dark mode works normally */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <span className="text-xl font-bold text-gray-900 dark:text-white leading-none">
-                        {total}
-                    </span>
-                    <span className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">total</span>
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 flex flex-col hover:shadow-md transition-shadow">
+            <div className="flex items-start justify-between">
+                <div>
+                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
+                    <h3 className="text-3xl font-bold text-gray-900 dark:text-white mt-2">{value}</h3>
+                </div>
+                <div className={`p-3 rounded-lg ${colorClasses[color]}`}>
+                    <Icon className="w-6 h-6" />
                 </div>
             </div>
-
-            {/* Legend */}
-            <div className="flex flex-col gap-2.5 min-w-0 flex-1">
-                {segments.map((s, i) => {
-                    const pct = total > 0 ? ((s.value / total) * 100).toFixed(0) : 0;
-                    return (
-                        <div key={i} className="flex items-center gap-2 min-w-0">
-                            <span className="w-2.5 h-2.5 rounded-full shrink-0"
-                                style={{ backgroundColor: s.color }} />
-                            <span className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                                {s.label}
-                            </span>
-                            <span className="ml-auto pl-2 text-xs font-bold text-gray-800 dark:text-gray-200 shrink-0">
-                                {s.value}
-                            </span>
-                            <span className="text-xs text-gray-400 dark:text-gray-500 w-8 text-right shrink-0">
-                                {pct}%
-                            </span>
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
-    );
-}
-
-// ── shared empty-chart placeholder ───────────────────────────────────────────
-
-function EmptyChartPlaceholder() {
-    return (
-        <div className="w-full h-full bg-gray-100 dark:bg-gray-800 rounded-xl flex items-center justify-center">
-            <span className="text-[10px] text-gray-400 dark:text-gray-500">No data yet</span>
-        </div>
-    );
-}
-
-// ── trend line chart ──────────────────────────────────────────────────────────
-// Pure SVG polyline + area gradient. No library required.
-// preserveAspectRatio="none" lets the chart fill its container width.
-// vectorEffect="non-scaling-stroke" keeps strokeWidth at 1.5px regardless of scaling.
-
-function TrendChart({ data, color, gradientId }) {
-    if (!data?.length || data.length < 2) {
-        return <EmptyChartPlaceholder />;
-    }
-    const W   = 400;
-    const H   = 80;
-    const PAD = 2;
-    const max = Math.max(...data.map((d) => d.count), 1);
-
-    const pts = data.map((d, i) => ({
-        x: PAD + (i / (data.length - 1)) * (W - 2 * PAD),
-        y: PAD + (1 - d.count / max) * (H - 2 * PAD),
-    }));
-
-    const polyPts = pts.map((p) => `${p.x},${p.y}`).join(" ");
-    const areaD = [
-        `M ${pts[0].x} ${H}`,
-        ...pts.map((p) => `L ${p.x} ${p.y}`),
-        `L ${pts[pts.length - 1].x} ${H}`,
-        "Z",
-    ].join(" ");
-
-    return (
-        <svg
-            viewBox={`0 0 ${W} ${H}`}
-            className="w-full"
-            preserveAspectRatio="none"
-            aria-hidden="true"
-        >
-            <defs>
-                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%"   stopColor={color} stopOpacity="0.22" />
-                    <stop offset="100%" stopColor={color} stopOpacity="0.01" />
-                </linearGradient>
-            </defs>
-            <path d={areaD} fill={`url(#${gradientId})`} />
-            <polyline
-                points={polyPts}
-                fill="none"
-                stroke={color}
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                vectorEffect="non-scaling-stroke"
-            />
-        </svg>
-    );
-}
-
-// ── lead trend chart (professional, full-width) ──────────────────────────────
-
-// Returns the smallest multiple of `ticks` that is ≥ maxVal and has clean tick labels.
-function niceMax(maxVal, ticks = 4) {
-    if (!maxVal || maxVal <= 0) return ticks;
-    const raw  = maxVal / ticks;
-    const pow  = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1))));
-    const step = [1, 2, 5, 10].find((f) => f * pow >= raw) ?? 10;
-    return step * pow * ticks;
-}
-
-// Catmull-Rom spline → cubic bezier path string for a smooth, library-free trend line.
-// Control-point Y values are clamped to [minY, maxY] to prevent overshooting.
-function smoothPath(pts, minY, maxY) {
-    if (pts.length < 2) return "";
-    const clamp = (v) => Math.min(Math.max(v, minY), maxY);
-    const d = [`M ${pts[0].x},${pts[0].y}`];
-    for (let i = 0; i < pts.length - 1; i++) {
-        const p0 = pts[Math.max(i - 1, 0)];
-        const p1 = pts[i];
-        const p2 = pts[i + 1];
-        const p3 = pts[Math.min(i + 2, pts.length - 1)];
-        const cp1x = p1.x + (p2.x - p0.x) / 6;
-        const cp1y = clamp(p1.y + (p2.y - p0.y) / 6);
-        const cp2x = p2.x - (p3.x - p1.x) / 6;
-        const cp2y = clamp(p2.y - (p3.y - p1.y) / 6);
-        d.push(`C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`);
-    }
-    return d.join(" ");
-}
-
-function LeadTrendChart({ data }) {
-    if (!data?.length || data.length < 2) {
-        return (
-            <div className="flex items-center justify-center h-full">
-                <EmptyChartPlaceholder />
-            </div>
-        );
-    }
-
-    const W = 600, H = 180;
-    const ML = 36, MR = 12, MT = 14, MB = 28;
-    const cW = W - ML - MR;
-    const cH = H - MT - MB;
-
-    const maxRaw = Math.max(...data.map((d) => d.count));
-    const yMax   = niceMax(maxRaw, 4);
-    const TICKS  = 4;
-
-    const toX = (i) => ML + (i / (data.length - 1)) * cW;
-    const toY = (v) => MT + (1 - v / yMax) * cH;
-
-    const pts      = data.map((d, i) => ({ x: toX(i), y: toY(d.count) }));
-    const linePath = smoothPath(pts, MT, MT + cH);
-    const areaPath = `${linePath} L ${pts[pts.length - 1].x},${MT + cH} L ${pts[0].x},${MT + cH} Z`;
-
-    const yTicks = Array.from({ length: TICKS + 1 }, (_, i) => (yMax / TICKS) * i);
-    // X labels every ~5 days; deduplicate in case last index coincides with 25
-    const xIdxs = [0, 5, 10, 15, 20, 25, data.length - 1].filter(
-        (v, i, a) => v < data.length && a.indexOf(v) === i,
-    );
-    // Peak marker — highest-count day
-    const peakIdx = maxRaw > 0
-        ? data.reduce((mi, d, i) => (d.count > data[mi].count ? i : mi), 0)
-        : -1;
-
-    return (
-        <svg
-            viewBox={`0 0 ${W} ${H}`}
-            className="w-full h-full"
-            aria-label="Lead trend over last 30 days"
-        >
-            <defs>
-                <linearGradient id="leadTrendAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%"   stopColor="#2563eb" stopOpacity="0.15" />
-                    <stop offset="100%" stopColor="#2563eb" stopOpacity="0.01" />
-                </linearGradient>
-            </defs>
-
-            {/* Horizontal grid lines + Y-axis labels */}
-            {yTicks.map((v, i) => (
-                <g key={i}>
-                    <line
-                        x1={ML} y1={toY(v)} x2={W - MR} y2={toY(v)}
-                        className="stroke-gray-100 dark:stroke-gray-800"
-                        strokeWidth="1"
-                    />
-                    <text
-                        x={ML - 6} y={toY(v)}
-                        textAnchor="end" dominantBaseline="middle"
-                        fontSize="9"
-                        className="fill-gray-400 dark:fill-gray-500"
-                    >
-                        {v}
-                    </text>
-                </g>
-            ))}
-
-            {/* Gradient area under the line */}
-            <path d={areaPath} fill="url(#leadTrendAreaGrad)" />
-
-            {/* Smooth trend line */}
-            <path
-                d={linePath}
-                fill="none"
-                stroke="#2563eb"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-            />
-
-            {/* Peak day dot */}
-            {peakIdx >= 0 && (
-                <circle
-                    cx={pts[peakIdx].x}
-                    cy={pts[peakIdx].y}
-                    r="3.5"
-                    fill="#2563eb"
-                    className="stroke-white dark:stroke-gray-900"
-                    strokeWidth="1.5"
-                />
-            )}
-
-            {/* X-axis day labels */}
-            {xIdxs.map((i) => (
-                <text
-                    key={i}
-                    x={pts[i].x}
-                    y={H - MB + 14}
-                    textAnchor={i === 0 ? "start" : i === data.length - 1 ? "end" : "middle"}
-                    fontSize="9"
-                    className="fill-gray-400 dark:fill-gray-500"
-                >
-                    {fmtShort(data[i].date)}
-                </text>
-            ))}
-        </svg>
-    );
-}
-
-// ── horizontal bar chart ──────────────────────────────────────────────────────
-
-const STATUS_BARS = [
-    { key: "NEW",       label: "New",       barCls: "bg-blue-500",  textCls: "text-blue-600 dark:text-blue-400" },
-    { key: "CONTACTED", label: "Contacted", barCls: "bg-amber-500", textCls: "text-amber-600 dark:text-amber-400" },
-    { key: "CONVERTED", label: "Converted", barCls: "bg-green-500", textCls: "text-green-600 dark:text-green-400" },
-];
-
-function StatusBars({ data }) {
-    const safeData = data ?? {};
-    const max = Math.max(...STATUS_BARS.map((b) => safeData[b.key] ?? 0), 1);
-    return (
-        <div className="flex flex-col gap-4">
-            {STATUS_BARS.map(({ key, label, barCls, textCls }) => {
-                const value = safeData[key] ?? 0;
-                const pct   = ((value / max) * 100).toFixed(0);
-                return (
-                    <div key={key}>
-                        <div className="flex items-center justify-between mb-1.5">
-                            <span className={`text-xs font-semibold ${textCls}`}>{label}</span>
-                            <span className="text-xs font-bold text-gray-700 dark:text-gray-300">{value}</span>
-                        </div>
-                        <div className="h-2.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                            <div
-                                className={`h-full ${barCls} rounded-full transition-all duration-700`}
-                                style={{ width: `${pct}%` }}
-                            />
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
-    );
-}
-
-// ── lead status funnel ────────────────────────────────────────────────────────
-// CONVERTED is displayed as "Qualified" — it is the final successful stage in
-// this pipeline (no API change; just a UI label).
-
-const FUNNEL_STAGES = [
-    {
-        key:    "NEW",
-        label:  "New",
-        color:  "#2563eb",
-        bgCls:  "bg-blue-50 dark:bg-blue-900/20",
-        bdrCls: "border-blue-200 dark:border-blue-800",
-        numCls: "text-blue-700 dark:text-blue-300",
-        barCls: "bg-blue-500",
-    },
-    {
-        key:    "CONTACTED",
-        label:  "Contacted",
-        color:  "#d97706",
-        bgCls:  "bg-amber-50 dark:bg-amber-900/20",
-        bdrCls: "border-amber-200 dark:border-amber-800",
-        numCls: "text-amber-700 dark:text-amber-300",
-        barCls: "bg-amber-500",
-    },
-    {
-        key:    "CONVERTED",
-        label:  "Qualified",
-        color:  "#059669",
-        bgCls:  "bg-emerald-50 dark:bg-emerald-900/20",
-        bdrCls: "border-emerald-200 dark:border-emerald-800",
-        numCls: "text-emerald-700 dark:text-emerald-300",
-        barCls: "bg-emerald-500",
-    },
-];
-
-function LeadStatusFunnel({ statusData }) {
-    const safeData = statusData ?? {};
-    const stages   = FUNNEL_STAGES.map((s) => ({ ...s, count: safeData[s.key] ?? 0 }));
-    const total    = stages.reduce((sum, s) => sum + s.count, 0);
-
-    // Conversion rate from stage[i] → stage[i+1]; null when denominator is 0.
-    const convRates = stages.slice(0, -1).map((s, i) =>
-        s.count > 0 ? (stages[i + 1].count / s.count) * 100 : null,
-    );
-
-    if (total === 0) {
-        return (
-            <div className="flex flex-col items-center justify-center py-8 gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-                    <TrendingUp size={20} className="text-gray-400 dark:text-gray-600" />
+            {trend && (
+                <div className="mt-4 flex items-center text-sm">
+                    <span className="text-gray-500 dark:text-gray-400">{trend}</span>
                 </div>
-                <div className="text-center">
-                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400">No leads yet</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                        Pipeline data will appear as leads are captured.
-                    </p>
-                </div>
-            </div>
-        );
-    }
-
-    return (
-        <div className="flex flex-col">
-            {stages.map((stage, i) => {
-                const pct    = total > 0 ? (stage.count / total) * 100 : 0;
-                const isLast = i === stages.length - 1;
-                return (
-                    <div key={stage.key}>
-                        {/* Stage row */}
-                        <div className={`flex items-center gap-3 px-3.5 py-3 rounded-xl border ${stage.bgCls} ${stage.bdrCls}`}>
-                            {/* Colour accent bar */}
-                            <div
-                                className="w-1 h-10 rounded-full shrink-0"
-                                style={{ backgroundColor: stage.color }}
-                            />
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between mb-1.5">
-                                    <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 tracking-wide uppercase">
-                                        {stage.label}
-                                    </span>
-                                    <div className="flex items-center gap-2 shrink-0">
-                                        <span className={`text-sm font-bold tabular-nums ${stage.numCls}`}>
-                                            {stage.count}
-                                        </span>
-                                        <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums w-9 text-right">
-                                            {pct.toFixed(0)}%
-                                        </span>
-                                    </div>
-                                </div>
-                                {/* Proportional bar */}
-                                <div className="h-1.5 bg-white/70 dark:bg-gray-900/50 rounded-full overflow-hidden">
-                                    <div
-                                        className={`h-full ${stage.barCls} rounded-full transition-all duration-700`}
-                                        style={{ width: `${pct.toFixed(1)}%` }}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Conversion connector */}
-                        {!isLast && (
-                            <div className="flex items-center gap-1.5 pl-[22px] py-1.5">
-                                <div className="flex flex-col items-center gap-px shrink-0">
-                                    <div className="w-px h-2 bg-gray-200 dark:bg-gray-700" />
-                                    {/* Down-arrow chevron */}
-                                    <svg width="8" height="5" viewBox="0 0 8 5" aria-hidden="true">
-                                        <path d="M4 5L0 0h8L4 5z" fill="currentColor" className="text-gray-300 dark:text-gray-600" />
-                                    </svg>
-                                </div>
-                                <span className="text-[11px] font-medium text-gray-400 dark:text-gray-500">
-                                    {convRates[i] !== null
-                                        ? `${convRates[i].toFixed(0)}% conversion`
-                                        : "— conversion (no upstream leads)"}
-                                </span>
-                            </div>
-                        )}
-                    </div>
-                );
-            })}
-
-            {/* Summary footer */}
-            <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                <span className="text-xs text-gray-400 dark:text-gray-500">Total leads</span>
-                <span className="text-xs font-bold text-gray-700 dark:text-gray-300 tabular-nums">{total}</span>
-            </div>
-        </div>
-    );
-}
-
-// ── source config (donut colours mirror the existing source cards) ─────────────
-
-const DONUT_SOURCES = [
-    { key: "customer_portal", label: "Customer Portal", color: "#7c3aed" }, // violet-700
-    { key: "business_chat",   label: "Business Chat",   color: "#2563eb" }, // blue-600
-    { key: "receptionist",    label: "Receptionist",    color: "#059669" }, // emerald-600
-];
-
-// ── professional conversation sources donut ──────────────────────────────────
-
-function ConversationSourcesDonut({ sources }) {
-    const segments = DONUT_SOURCES.map((s) => ({
-        ...s,
-        count: sources?.[s.key] ?? 0,
-    }));
-    const total = segments.reduce((sum, s) => sum + s.count, 0);
-
-    const r    = 54;
-    const cx   = 72;
-    const cy   = 72;
-    const circ = 2 * Math.PI * r;
-
-    let cum = 0;
-    const slices = segments.map((seg) => {
-        const pct  = total > 0 ? seg.count / total : 0;
-        const dash = pct * circ;
-        const off  = -cum * circ;
-        cum += pct;
-        return { ...seg, pct, dash, off };
-    });
-
-    return (
-        <div className="flex flex-col items-center gap-5">
-            {/* Ring */}
-            <div className="relative w-36 h-36 shrink-0">
-                <svg viewBox="0 0 144 144" className="w-full h-full" aria-hidden="true">
-                    {/* background track */}
-                    <circle
-                        cx={cx} cy={cy} r={r}
-                        fill="none" strokeWidth="20"
-                        className="stroke-gray-100 dark:stroke-gray-800"
-                    />
-                    {total > 0 && (
-                        <g transform={`rotate(-90 ${cx} ${cy})`}>
-                            {slices.map((s, i) => (
-                                <circle
-                                    key={i}
-                                    cx={cx} cy={cy} r={r}
-                                    fill="none"
-                                    stroke={s.color}
-                                    strokeWidth="20"
-                                    strokeDasharray={`${s.dash} ${circ}`}
-                                    strokeDashoffset={s.off}
-                                />
-                            ))}
-                        </g>
-                    )}
-                </svg>
-                {/* Centre label */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <span className="text-2xl font-bold text-gray-900 dark:text-white leading-none">
-                        {total}
-                    </span>
-                    <span className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
-                        {total === 0 ? "no data" : "total"}
-                    </span>
-                </div>
-            </div>
-
-            {/* Legend — colour swatch + label + count + mini bar + percentage */}
-            <div className="w-full flex flex-col gap-3">
-                {slices.map((s, i) => (
-                    <div key={i}>
-                        <div className="flex items-center gap-2 mb-1">
-                            <span
-                                className="w-2.5 h-2.5 rounded-full shrink-0"
-                                style={{ backgroundColor: s.color }}
-                            />
-                            <span className="text-xs text-gray-600 dark:text-gray-400 flex-1 truncate">
-                                {s.label}
-                            </span>
-                            <span className="text-xs font-bold text-gray-800 dark:text-gray-200 tabular-nums">
-                                {s.count}
-                            </span>
-                            <span className="text-xs text-gray-400 dark:text-gray-500 w-8 text-right tabular-nums">
-                                {total > 0 ? `${(s.pct * 100).toFixed(0)}%` : "–"}
-                            </span>
-                        </div>
-                        {/* proportional bar */}
-                        <div className="h-1 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                            <div
-                                className="h-full rounded-full transition-all duration-700"
-                                style={{
-                                    width:           `${(s.pct * 100).toFixed(0)}%`,
-                                    backgroundColor: s.color,
-                                    opacity:         s.count === 0 ? 0.25 : 1,
-                                }}
-                            />
-                        </div>
-                    </div>
-                ))}
-            </div>
-
-            {/* Empty-state hint */}
-            {total === 0 && (
-                <p className="text-xs text-center text-gray-400 dark:text-gray-500 -mt-1">
-                    No conversations recorded yet.
-                </p>
             )}
         </div>
     );
 }
 
-// ── SectionCard wrapper ───────────────────────────────────────────────────────
-
-function SectionCard({ title, subtitle, children, className = "" }) {
+function EmptyState({ message }) {
     return (
-        <div className={`bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-5 ${className}`}>
-            <div className="mb-4">
-                <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h2>
-                {subtitle && (
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{subtitle}</p>
-                )}
-            </div>
-            {children}
+        <div className="flex flex-col items-center justify-center p-8 text-center bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
+            <BarChart3 className="w-10 h-10 text-gray-400 mb-3" />
+            <p className="text-sm text-gray-500 dark:text-gray-400">{message}</p>
         </div>
     );
 }
-
-// ── page ──────────────────────────────────────────────────────────────────────
 
 export default function AnalyticsPage() {
-    const [data, setData]       = useState(null);
+    const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError]     = useState(null);
+    const [error, setError] = useState(null);
+    const [dateRange, setDateRange] = useState("30"); // days
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        setError(null);
+    const fetchData = useCallback(async () => {
         try {
-            setData(await getAnalytics());
+            setLoading(true);
+            const now = new Date();
+            let startDate = null;
+            let endDate = null;
+
+            if (dateRange !== 'all') {
+                startDate = new Date();
+                startDate.setDate(now.getDate() - parseInt(dateRange));
+                startDate = startDate.toISOString();
+                endDate = now.toISOString();
+            }
+
+            const res = await getAnalyticsDashboard({ startDate, endDate });
+            setData(res);
+            setError(null);
         } catch (err) {
-            setError(err?.response?.data?.message ?? "Failed to load analytics.");
+            console.error("Error fetching analytics:", err);
+            setError("Failed to load analytics data.");
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [dateRange]);
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
 
-    // Derived values computed once data is available.
-    const leads30Total = data?.leadsByDay?.reduce((s, d) => s + d.count, 0) ?? 0;
-    const convs30Total = data?.conversationsByDay?.reduce((s, d) => s + d.count, 0) ?? 0;
+    const healthScore = useMemo(() => calculateBusinessHealth(data), [data]);
+    const insights = useMemo(() => generateInsights(data), [data]);
+    const recommendations = useMemo(() => generateRecommendations(data), [data]);
+
+    const healthColor = healthScore > 80 ? 'text-green-600' : healthScore > 50 ? 'text-amber-600' : 'text-red-600';
+    const requestPieData = useMemo(() => {
+        if (!data) return [];
+        return [
+            { name: 'Complaints', value: data.complaints },
+            { name: 'Escalations', value: data.escalations },
+            { name: 'Callbacks', value: data.callbackRequests },
+            { name: 'General', value: data.generalSupport },
+        ].filter(d => d.value > 0);
+    }, [data]);
+
+    if (loading) {
+        return (
+            <div className="p-8 max-w-7xl mx-auto flex items-center justify-center min-h-[60vh]">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="p-8 max-w-7xl mx-auto">
+                <div className="bg-red-50 text-red-700 p-4 rounded-xl border border-red-200">
+                    <AlertTriangle className="w-6 h-6 mb-2" />
+                    <p>{error}</p>
+                    <button onClick={fetchData} className="mt-4 px-4 py-2 bg-white rounded-lg shadow-sm font-medium hover:bg-gray-50 transition">Retry</button>
+                </div>
+            </div>
+        );
+    }
+
+    if (!data) return null;
 
     return (
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-
-            {/* Page header */}
-            <div>
-                <h1 className="text-xl font-bold text-gray-900 dark:text-white">Analytics</h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                    Activity summary for your AI receptionist
-                </p>
+        <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 bg-gray-50/50 dark:bg-gray-900 min-h-screen">
+            {/* Header & Filters */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Business Intelligence</h1>
+                    <p className="text-gray-500 dark:text-gray-400 mt-1">AI-powered insights and analytics</p>
+                </div>
+                <div className="flex items-center gap-2">
+                    <select 
+                        value={dateRange}
+                        onChange={(e) => setDateRange(e.target.value)}
+                        className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 shadow-sm focus:ring-2 focus:ring-blue-500"
+                    >
+                        <option value="1">Today</option>
+                        <option value="7">Last 7 Days</option>
+                        <option value="30">Last 30 Days</option>
+                        <option value="90">Last 90 Days</option>
+                        <option value="all">All Time</option>
+                    </select>
+                </div>
             </div>
 
-            {/* ── Loading skeleton ───────────────────────────────────────────── */}
-            {loading && (
-                <div className="space-y-4">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                        {Array.from({ length: 4 }).map((_, i) => (
-                            <div key={i} className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-5 animate-pulse">
-                                <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-800 mb-3" />
-                                <div className="h-7 w-12 bg-gray-100 dark:bg-gray-800 rounded-lg mb-2" />
-                                <div className="h-3 w-24 bg-gray-100 dark:bg-gray-800 rounded" />
-                            </div>
-                        ))}
+            {/* AI Business Summary (Hero Card) */}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 md:p-8 text-white shadow-lg relative overflow-hidden">
+                <div className="relative z-10">
+                    <div className="flex items-center gap-3 mb-4">
+                        <Zap className="w-6 h-6 text-yellow-300" />
+                        <h2 className="text-xl font-bold">AI Business Summary</h2>
                     </div>
-                    <div className="grid sm:grid-cols-2 gap-4">
-                        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm h-44 animate-pulse" />
-                        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm h-44 animate-pulse" />
-                    </div>
-                    <div className="grid sm:grid-cols-2 gap-4">
-                        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm h-48 animate-pulse" />
-                        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm h-48 animate-pulse" />
-                    </div>
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm h-64 animate-pulse" />
+                    <ul className="space-y-3 md:space-y-2 text-lg text-blue-50">
+                        <li className="flex items-center gap-2"><CheckCircle className="w-5 h-5 text-blue-300" /> {data.newLeads} new leads captured</li>
+                        <li className="flex items-center gap-2"><CheckCircle className="w-5 h-5 text-blue-300" /> AI resolved {data.aiResolvedConvs} conversations automatically</li>
+                        <li className="flex items-center gap-2"><CheckCircle className="w-5 h-5 text-blue-300" /> {data.complaints} complaints require your attention</li>
+                        <li className="flex items-center gap-2"><CheckCircle className="w-5 h-5 text-blue-300" /> {data.callbackRequests} customers requested callbacks</li>
+                        <li className="flex items-center gap-2"><CheckCircle className="w-5 h-5 text-blue-300" /> Customer satisfaction is {data.averageRating}★</li>
+                    </ul>
                 </div>
-            )}
+            </div>
 
-            {/* ── Error ─────────────────────────────────────────────────────── */}
-            {error && !loading && (
-                <div className="flex items-start gap-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl px-5 py-4">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-red-500 shrink-0 mt-0.5">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
-                    </svg>
-                    <div>
-                        <p className="text-sm font-semibold text-red-700 dark:text-red-400">Failed to load analytics</p>
-                        <p className="text-xs text-red-600 dark:text-red-500 mt-0.5">{error}</p>
+            {/* Business Health & KPIs */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="col-span-1 md:col-span-2 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
+                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Business Health Score</h3>
+                    <div className="flex items-end gap-4">
+                        <span className={`text-6xl font-bold ${healthColor}`}>{healthScore}</span>
+                        <span className="text-gray-400 text-2xl mb-1">/100</span>
+                    </div>
+                    <div className="mt-6 flex flex-wrap gap-4 text-sm">
+                        <div className="flex flex-col">
+                            <span className="text-gray-500">AI Resolution</span>
+                            <span className="font-semibold text-gray-900 dark:text-white">{data.aiResolutionRate}%</span>
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-gray-500">Avg Rating</span>
+                            <span className="font-semibold text-gray-900 dark:text-white">{data.averageRating}★</span>
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-gray-500">Pending Requests</span>
+                            <span className="font-semibold text-gray-900 dark:text-white">{data.pendingRequests}</span>
+                        </div>
                     </div>
                 </div>
-            )}
 
-            {/* ── Content ───────────────────────────────────────────────────── */}
-            {!loading && !error && data && (
-                <>
-                    {/* 1 ─ KPI cards */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                        {KPI_CONFIG.map(({ key, label, Icon, iconBg, iconCls, valueColor }) => (
-                            <div
-                                key={key}
-                                className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm px-5 py-5 flex flex-col gap-3 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
-                            >
-                                <div className={`w-9 h-9 rounded-xl ${iconBg} flex items-center justify-center`}>
-                                    <Icon size={18} className={iconCls} />
-                                </div>
-                                <div>
-                                    <p className={`text-2xl sm:text-3xl font-bold leading-none ${valueColor}`}>
-                                        {data[key] ?? 0}
-                                    </p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium mt-1.5 leading-snug">
-                                        {label}
-                                    </p>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+                <MetricCard title="Total Leads" value={data.totalLeadsPeriod} icon={Users} color="blue" trend={`All time: ${data.totalLeadsAllTime}`} />
+                <MetricCard title="Conversion Rate" value={`${data.conversionRate}%`} icon={TrendingUp} color="green" trend={`${data.convertedLeads} converted`} />
+                <MetricCard title="Active Requests" value={data.pendingRequests} icon={Briefcase} color="amber" trend={`${data.resolvedRequests} resolved`} />
+                <MetricCard title="AI Resolution Rate" value={`${data.aiResolutionRate}%`} icon={Bot} color="purple" trend={`${data.aiResolvedConvs} handled`} />
+            </div>
 
-                    {/* 2 ─ Lead trend — full-width professional chart */}
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-5">
-                        <div className="flex items-start justify-between mb-4">
-                            <div>
-                                <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
-                                    Lead Trend — Last 30 Days
-                                </h2>
-                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                                    Daily lead captures
-                                </p>
-                            </div>
-                            <div className="text-right shrink-0 ml-4">
-                                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 leading-none">
-                                    {leads30Total}
-                                </p>
-                                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
-                                    total in period
-                                </p>
-                            </div>
-                        </div>
-                        <div className="h-44">
-                            <LeadTrendChart data={data.leadsByDay ?? []} />
-                        </div>
-                    </div>
-
-                    {/* 3 ─ Trend sparklines */}
-                    <div className="grid sm:grid-cols-2 gap-4">
-                        {/* Leads trend */}
-                        <SectionCard
-                            title="Leads Trend"
-                            subtitle="Last 30 days"
-                        >
-                            <div className="flex items-baseline justify-between mb-3">
-                                <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                                    {leads30Total}
-                                </span>
-                                <span className="text-xs text-gray-400 dark:text-gray-500">
-                                    leads captured
-                                </span>
-                            </div>
-                            <div className="h-20">
-                                <TrendChart
-                                    data={data.leadsByDay ?? []}
-                                    color="#2563eb"
-                                    gradientId="grad-leads"
-                                />
-                            </div>
-                            <div className="flex justify-between mt-1.5">
-                                <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                                    {data.leadsByDay?.[0] ? fmtShort(data.leadsByDay[0].date) : "–"}
-                                </span>
-                                <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                                    {data.leadsByDay?.length > 0 ? fmtShort(data.leadsByDay[data.leadsByDay.length - 1].date) : "–"}
-                                </span>
-                            </div>
-                        </SectionCard>
-
-                        {/* Conversations trend */}
-                        <SectionCard
-                            title="Conversations Trend"
-                            subtitle="Last 30 days"
-                        >
-                            <div className="flex items-baseline justify-between mb-3">
-                                <span className="text-2xl font-bold text-violet-600 dark:text-violet-400">
-                                    {convs30Total}
-                                </span>
-                                <span className="text-xs text-gray-400 dark:text-gray-500">
-                                    conversations
-                                </span>
-                            </div>
-                            <div className="h-20">
-                                <TrendChart
-                                    data={data.conversationsByDay ?? []}
-                                    color="#7c3aed"
-                                    gradientId="grad-convs"
-                                />
-                            </div>
-                            <div className="flex justify-between mt-1.5">
-                                <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                                    {data.conversationsByDay?.[0] ? fmtShort(data.conversationsByDay[0].date) : "–"}
-                                </span>
-                                <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                                    {data.conversationsByDay?.length > 0 ? fmtShort(data.conversationsByDay[data.conversationsByDay.length - 1].date) : "–"}
-                                </span>
-                            </div>
-                        </SectionCard>
-                    </div>
-
-                    {/* 4 ─ Conversation Sources donut + Status bars */}
-                    <div className="grid sm:grid-cols-2 gap-4">
-                        {/* Professional conversation sources donut */}
-                        <SectionCard
-                            title="Conversation Sources"
-                            subtitle="How visitors reach your AI receptionist"
-                            className="flex flex-col justify-between"
-                        >
-                            <ConversationSourcesDonut sources={data?.conversationSources ?? {}} />
-                        </SectionCard>
-
-                        {/* Lead status funnel */}
-                        <SectionCard
-                            title="Lead Status Funnel"
-                            subtitle="Pipeline conversion from capture to qualified"
-                        >
-                            <LeadStatusFunnel statusData={data.leadsByStatus ?? {}} />
-                        </SectionCard>
-                    </div>
-
-                    {/* 5 ─ Recent leads table */}
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
-                        <div className="px-5 py-4 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
-                            <div>
-                                <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Recent Leads</h2>
-                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                                    Last {data.recentLeads?.length ?? 0} captured contacts
-                                </p>
-                            </div>
-                            <Link
-                                to="/leads"
-                                className="flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
-                            >
-                                View all
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                                    <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06l-4.25 4.25a.75.75 0 01-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                                </svg>
-                            </Link>
-                        </div>
-
-                        {(data.recentLeads?.length ?? 0) === 0 ? (
-                            <div className="px-8 py-16 flex flex-col items-center text-center gap-4">
-                                <div className="w-14 h-14 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-                                    <Users size={22} className="text-gray-400 dark:text-gray-600" />
-                                </div>
-                                <div>
-                                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">No leads yet</p>
-                                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                                        Leads captured by your AI receptionist will appear here.
-                                    </p>
-                                </div>
-                            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Insights & Recommendations */}
+                <div className="col-span-1 space-y-8">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                            <Lightbulb className="w-5 h-5 text-amber-500" />
+                            Business Insights
+                        </h3>
+                        {insights.length > 0 ? (
+                            <ul className="space-y-4">
+                                {insights.map((insight, i) => (
+                                    <li key={i} className="text-sm text-gray-700 dark:text-gray-300 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                                        {insight}
+                                    </li>
+                                ))}
+                            </ul>
                         ) : (
-                            <>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm min-w-[580px]">
-                                        <thead>
-                                            <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/50">
-                                                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Name</th>
-                                                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Email</th>
-                                                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Phone</th>
-                                                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Interest</th>
-                                                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Status</th>
-                                                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Date</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                                            {data.recentLeads.map((lead) => (
-                                                <tr key={lead.id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors">
-                                                    <td className="px-5 py-3.5">
-                                                        {lead.name ? (
-                                                            <div className="flex items-center gap-2">
-                                                                <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0">
-                                                                    <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
-                                                                        {lead.name.charAt(0).toUpperCase()}
-                                                                    </span>
-                                                                </div>
-                                                                <span className="font-medium text-gray-800 dark:text-gray-200 truncate max-w-[100px]">
-                                                                    {lead.name}
-                                                                </span>
-                                                            </div>
-                                                        ) : (
-                                                            <span className="text-gray-300 dark:text-gray-600 text-xs">—</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-5 py-3.5 text-gray-600 dark:text-gray-400">
-                                                        {lead.email ?? <span className="text-gray-300 dark:text-gray-600">—</span>}
-                                                    </td>
-                                                    <td className="px-5 py-3.5 whitespace-nowrap text-gray-600 dark:text-gray-400">
-                                                        {lead.phone ?? <span className="text-gray-300 dark:text-gray-600">—</span>}
-                                                    </td>
-                                                    <td className="px-5 py-3.5 text-gray-600 dark:text-gray-400">
-                                                        {lead.interest ?? <span className="text-gray-300 dark:text-gray-600">—</span>}
-                                                    </td>
-                                                    <td className="px-5 py-3.5">
-                                                        <StatusBadge status={lead.status} />
-                                                    </td>
-                                                    <td className="px-5 py-3.5 whitespace-nowrap text-xs text-gray-400 dark:text-gray-500">
-                                                        {fmtLong(lead.createdAt)}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30">
-                                    <Link to="/leads" className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline">
-                                        View all {data.totalLeads} leads →
-                                    </Link>
-                                </div>
-                            </>
+                            <EmptyState message="More insights will appear as customer interactions increase." />
                         )}
                     </div>
-                </>
-            )}
+
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                            <Briefcase className="w-5 h-5 text-blue-500" />
+                            AI Recommendations
+                        </h3>
+                        {recommendations.length > 0 ? (
+                            <ul className="space-y-3">
+                                {recommendations.map((rec, i) => (
+                                    <li key={i} className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                                        <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${rec.priority === 'High' ? 'bg-red-500' : rec.priority === 'Medium' ? 'bg-amber-500' : 'bg-blue-500'}`} />
+                                        <p className="text-sm text-gray-700 dark:text-gray-300">{rec.text}</p>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <EmptyState message="No current recommendations. You're doing great!" />
+                        )}
+                    </div>
+                </div>
+
+                {/* Charts Area */}
+                <div className="col-span-1 lg:col-span-2 space-y-8">
+                    {/* Sales Performance Chart */}
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-6">Sales Performance (Leads)</h3>
+                        <div className="h-72 w-full">
+                            {data.trends.leads.length > 0 ? (
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart data={data.trends.leads}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} />
+                                        <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} />
+                                        <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                        <Line type="monotone" dataKey="count" stroke={COLORS.blue} strokeWidth={3} dot={{r: 4, fill: COLORS.blue, strokeWidth: 0}} activeDot={{r: 6}} />
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            ) : (
+                                <EmptyState message="No leads data available for this period." />
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        {/* Customer Support Types Pie */}
+                        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-6">Support Requests</h3>
+                            <div className="h-56 w-full">
+                                {requestPieData.length > 0 ? (
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <PieChart>
+                                            <Pie
+                                                data={requestPieData}
+                                                cx="50%"
+                                                cy="50%"
+                                                innerRadius={60}
+                                                outerRadius={80}
+                                                paddingAngle={5}
+                                                dataKey="value"
+                                            >
+                                                {requestPieData.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                                                ))}
+                                            </Pie>
+                                            <Tooltip />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                ) : (
+                                    <EmptyState message="No support requests in this period." />
+                                )}
+                            </div>
+                            <div className="flex flex-wrap justify-center gap-4 mt-4">
+                                {requestPieData.map((entry, index) => (
+                                    <div key={index} className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}></div>
+                                        {entry.name} ({entry.value})
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Peak Activity Bar Chart */}
+                        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-6">Peak Activity (Hours)</h3>
+                            <div className="h-64 w-full">
+                                {data.trends.peakHours.length > 0 ? (
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={data.trends.peakHours}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                            <XAxis dataKey="hour" axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} />
+                                            <YAxis axisLine={false} tickLine={false} tick={{fill: '#9ca3af', fontSize: 12}} />
+                                            <Tooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                            <Bar dataKey="count" fill={COLORS.purple} radius={[4, 4, 0, 0]} />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                ) : (
+                                    <EmptyState message="Not enough activity to determine peak hours." />
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Customer Journey Funnel */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 lg:p-8">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-8">Customer Journey</h3>
+                <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                    {[
+                        { label: 'Conversations', value: data.totalConversations, color: 'bg-gray-100 text-gray-800' },
+                        { label: 'Leads Captured', value: data.totalLeadsPeriod, color: 'bg-blue-100 text-blue-800' },
+                        { label: 'Follow-ups', value: data.contactedLeads, color: 'bg-amber-100 text-amber-800' },
+                        { label: 'Meetings', value: data.meetingsScheduled, color: 'bg-purple-100 text-purple-800' },
+                        { label: 'Converted', value: data.convertedLeads, color: 'bg-green-100 text-green-800' }
+                    ].map((step, idx, arr) => (
+                        <div key={idx} className="flex flex-col items-center flex-1 w-full relative">
+                            <div className={`w-full py-4 px-2 rounded-xl text-center shadow-sm ${step.color}`}>
+                                <h4 className="text-2xl font-bold">{step.value}</h4>
+                                <p className="text-xs font-medium uppercase tracking-wider mt-1 opacity-80">{step.label}</p>
+                            </div>
+                            {idx < arr.length - 1 && (
+                                <div className="hidden md:block absolute top-1/2 -right-4 w-8 border-t-2 border-dashed border-gray-300 dark:border-gray-600 z-0"></div>
+                            )}
+                            {idx > 0 && step.value > 0 && arr[idx-1].value > 0 && (
+                                <p className="text-xs text-gray-500 mt-2 font-medium">
+                                    {Math.round((step.value / arr[idx-1].value) * 100)}% Conv
+                                </p>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* Activity Timeline */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-6">Activity Timeline</h3>
+                <div className="space-y-6">
+                    {data.activityTimeline.length > 0 ? (
+                        data.activityTimeline.map((item, idx) => {
+                            let Icon = FileText;
+                            let color = "text-gray-500 bg-gray-100 dark:bg-gray-800";
+                            
+                            if (item.type === 'LEAD') { Icon = Users; color = "text-blue-600 bg-blue-100 dark:bg-blue-900/30"; }
+                            else if (item.type === 'REQUEST') { 
+                                Icon = AlertTriangle; 
+                                color = item.requestType === 'COMPLAINT' || item.requestType === 'ESCALATION' ? "text-red-600 bg-red-100 dark:bg-red-900/30" : "text-amber-600 bg-amber-100 dark:bg-amber-900/30";
+                            }
+                            else if (item.type === 'MEETING') { Icon = CalendarDays; color = "text-purple-600 bg-purple-100 dark:bg-purple-900/30"; }
+                            else if (item.type === 'RATING') { Icon = Star; color = "text-yellow-600 bg-yellow-100 dark:bg-yellow-900/30"; }
+
+                            return (
+                                <div key={idx} className="flex gap-4">
+                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${color}`}>
+                                        <Icon className="w-5 h-5" />
+                                    </div>
+                                    <div className="flex-1 pb-6 border-b border-gray-100 dark:border-gray-700 last:border-0 last:pb-0">
+                                        <p className="text-sm font-medium text-gray-900 dark:text-white">{item.title}</p>
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            {new Date(item.date).toLocaleDateString()} {new Date(item.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                        </p>
+                                    </div>
+                                </div>
+                            );
+                        })
+                    ) : (
+                        <EmptyState message="No recent activity to display." />
+                    )}
+                </div>
+            </div>
         </div>
     );
 }

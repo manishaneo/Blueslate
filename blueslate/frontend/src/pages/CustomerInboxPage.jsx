@@ -9,6 +9,7 @@ import { Search, Filter, Inbox } from 'lucide-react';
 
 const TABS = [
     { id: 'ALL', label: 'All' },
+    { id: 'WITH_CONTACT', label: 'With Contact Info' },
     { id: 'NEW_LEADS', label: 'New Leads' },
     { id: 'CALLBACK_REQUEST', label: 'Callback Requests' },
     { id: 'COMPLAINT', label: 'Complaints' },
@@ -71,6 +72,11 @@ export default function CustomerInboxPage() {
             if (activeTab === 'RESOLVED' && req.status !== 'RESOLVED') return false;
             if (activeTab !== 'RESOLVED' && req.status === 'RESOLVED') return false;
             
+            if (activeTab === 'WITH_CONTACT') {
+                const hasLeadContact = req.lead && (req.lead.phone || req.lead.email);
+                const hasSnapshotContact = req.snapshotPhone || req.snapshotEmail;
+                if (!hasLeadContact && !hasSnapshotContact) return false;
+            }
             if (activeTab === 'NEW_LEADS' && !req.leadId) return false;
             if (['CALLBACK_REQUEST', 'COMPLAINT', 'ESCALATION', 'GENERAL'].includes(activeTab) && req.requestType !== activeTab) return false;
 

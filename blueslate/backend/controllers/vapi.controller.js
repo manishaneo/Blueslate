@@ -456,16 +456,23 @@ export async function handleVapiWebhook(req, res) {
                     capturedLeadId = existingInCorrect.id;
                     console.log("[VAPI WEBHOOK] lead already in correct context:", email ?? phone);
                     
-                    if (phone && !existingInCorrect.phone) {
+                    const updateData = {};
+                    if (phone && !existingInCorrect.phone) updateData.phone = phone;
+                    if (email && !existingInCorrect.email) updateData.email = email;
+                    if (name && !existingInCorrect.name) updateData.name = name;
+                    
+                    if (Object.keys(updateData).length > 0) {
                         try {
                             await prisma.lead.update({
                                 where: { id: capturedLeadId },
-                                data: { phone }
+                                data: updateData
                             });
-                            console.log("[VAPI WEBHOOK] updated lead phone:", phone);
+                            console.log("[VAPI WEBHOOK] updated lead info:", updateData);
                         } catch (e) {
-                            console.error("[VAPI WEBHOOK] failed to update lead phone:", e.message);
+                            console.error("[VAPI WEBHOOK] failed to update lead info:", e.message);
                         }
+                    } else {
+                        console.log("[VAPI WEBHOOK] preserved existing lead info, differing details kept as snapshot.");
                     }
                 } else {
                     // (b) Global search — look for a lead created in the wrong context.
@@ -490,6 +497,8 @@ export async function handleVapiWebhook(req, res) {
                                 webhookBusinessContext.id, "| id:", existingAnywhere.id);
                             const updateData = { businessContextId: webhookBusinessContext.id };
                             if (phone && !existingAnywhere.phone) updateData.phone = phone;
+                            if (email && !existingAnywhere.email) updateData.email = email;
+                            if (name && !existingAnywhere.name) updateData.name = name;
 
                             await prisma.lead.update({
                                 where: { id: existingAnywhere.id },
@@ -502,21 +511,43 @@ export async function handleVapiWebhook(req, res) {
                             console.log("[VAPI WEBHOOK] lead found in another business context — not migrating:", email ?? phone);
                         }
                     } else {
-                        // (c) No lead found anywhere — create one in the correct context.
-                        const interestStr = interest
-                            ?? (validCallerPhone === phone
-                                ? `${callType} call`
-                                : `Captured from ${callType} call transcript`);
-                        const lead = await createLead({
-                            businessContextId: webhookBusinessContext.id,
-                            name,
-                            email:    email ?? null,
-                            phone:    phone ?? null,
-                            interest: interestStr,
-                            source:   "vapi",
-                        });
-                        capturedLeadId = lead?.id ?? null;
-                        console.log("[VAPI WEBHOOK] new lead created:", { name, email, phone });
+                        // Scan transcript to determine if intent is SALES or SUPPORT.
+                        let isSalesIntent = false;
+                        const OPPORTUNITY_INTENTS = new Set([
+                            "admission", "pricing", "fees", "quote", "purchase", "buy",
+                            "enroll", "booking", "registration", "availability", 
+                            "interested", "demo", "trial"
+                        ]);
+                        for (const turn of (messages ?? [])) {
+                            if (turn.role !== "user" && turn.role !== "caller") continue;
+                            const text = (turn.message ?? turn.content ?? "").trim();
+                            if (!text) continue;
+                            const intentData = detectIntent(text);
+                            if (OPPORTUNITY_INTENTS.has(intentData.intent)) {
+                                isSalesIntent = true;
+                                break;
+                            }
+                        }
+                        
+                        if (isSalesIntent) {
+                            // (c) No lead found anywhere — create one in the correct context.
+                            const interestStr = interest
+                                ?? (validCallerPhone === phone
+                                    ? `${callType} call`
+                                    : `Captured from ${callType} call transcript`);
+                            const lead = await createLead({
+                                businessContextId: webhookBusinessContext.id,
+                                name,
+                                email:    email ?? null,
+                                phone:    phone ?? null,
+                                interest: interestStr,
+                                source:   "vapi",
+                            });
+                            capturedLeadId = lead?.id ?? null;
+                            console.log("[VAPI WEBHOOK] new lead created:", { name, email, phone });
+                        } else {
+                            console.log("[VAPI WEBHOOK] support intent detected, skipping lead creation. Snapshot will be saved.");
+                        }
                     }
                 }
             }
@@ -637,10 +668,40 @@ export async function handleVapiWebhook(req, res) {
                     }
 
                     try {
+                        let snapshotName = null, snapshotEmail = null, snapshotPhone = null;
+                        if (!capturedLeadId) {
+                            // Recover snapshot data from earlier pass
+                            let toolName = null, toolEmail = null, toolPhone = null;
+                            for (const m of (messages ?? [])) {
+                                const tcs = m.toolCalls ?? m.toolCallList ?? [];
+                                if (Array.isArray(tcs)) {
+                                    for (const tc of tcs) {
+                                        if (tc.function?.name === "captureLead") {
+                                            try {
+                                                const args = typeof tc.function.arguments === "string" ? JSON.parse(tc.function.arguments) : (tc.function.arguments ?? {});
+                                                toolName = args.name ?? null;
+                                                toolEmail = args.email ?? null;
+                                                toolPhone = args.phone ?? null;
+                                            } catch { /* skip */ }
+                                        }
+                                    }
+                                }
+                            }
+                            const { name: txName, email: txEmail, phone: txPhone } = transcriptText ? extractLeadData(transcriptText) : {};
+                            snapshotName = toolName ?? txName ?? null;
+                            snapshotEmail = toolEmail ?? txEmail ?? null;
+                            snapshotPhone = toolPhone ?? txPhone ?? null;
+                            const validCallerPhone = (callerPhone && callerPhone !== "unknown") ? callerPhone : null;
+                            if (!snapshotPhone && validCallerPhone) snapshotPhone = validCallerPhone;
+                        }
+
                         await triggerEscalation({
                             businessId: businessContext.businessId,
                             conversationId: conv.id,
                             leadId: capturedLeadId ?? undefined,
+                            snapshotName: snapshotName ?? undefined,
+                            snapshotEmail: snapshotEmail ?? undefined,
+                            snapshotPhone: snapshotPhone ?? undefined,
                             requestType: reqType,
                             aiSummary: summary,
                             aiReason: reason,
