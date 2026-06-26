@@ -436,12 +436,12 @@ export async function handleVapiWebhook(req, res) {
             let phone    = toolPhone    ?? txPhone  ?? null;
             let interest = toolInterest ?? null;
 
-            // Pass 3: outbound phone as guaranteed phone signal
-            const outboundPhone = (direction === "outbound" && callerPhone !== "unknown")
+            // Pass 3: caller phone as guaranteed phone signal
+            const validCallerPhone = (callerPhone && callerPhone !== "unknown")
                 ? callerPhone
                 : null;
-            if (!phone && outboundPhone) {
-                phone = outboundPhone;
+            if (!phone && validCallerPhone) {
+                phone = validCallerPhone;
             }
 
             if (email || phone) {
@@ -504,8 +504,8 @@ export async function handleVapiWebhook(req, res) {
                     } else {
                         // (c) No lead found anywhere — create one in the correct context.
                         const interestStr = interest
-                            ?? (outboundPhone === phone
-                                ? `Outbound ${callType} call`
+                            ?? (validCallerPhone === phone
+                                ? `${callType} call`
                                 : `Captured from ${callType} call transcript`);
                         const lead = await createLead({
                             businessContextId: webhookBusinessContext.id,

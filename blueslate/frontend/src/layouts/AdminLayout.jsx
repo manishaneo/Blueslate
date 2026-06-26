@@ -393,7 +393,7 @@ export default function AdminLayout() {
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
                 {/* Header */}
-                <header className="h-14 shrink-0 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 flex items-center px-4 sm:px-5 gap-3 z-10">
+                <header className="relative h-14 shrink-0 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 flex items-center px-4 sm:px-5 gap-3 z-50">
 
                     {/* Hamburger — mobile */}
                     <button
